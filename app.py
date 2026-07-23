@@ -610,14 +610,22 @@ def api_wm_verify_uploaded():
         else:
             recovered = recovered[:max_wm]
         did_bit_len = int(p.get('did_bit_len', 0))
+        ecc_pad = int(p.get('ecc_pad', 0))
         extracted_did = ''
-        if did_bit_len > 0 and did_bit_len <= len(recovered):
+        ecc_info = {'total_errors': 0, 'corrected': 0, 'failed_blocks': 0, 'raw_ber': 0.0, 'decode_error': ''}
+        # CRITICAL: recovered bits are ECC-encoded (812 bits), must decode to get raw DID bits (464)
+        try:
+            raw_bits, ecc_info = decode_with_ecc(recovered, ecc_pad)
+        except Exception as _ex:
+            ecc_info['decode_error'] = str(_ex)[:80]
+            raw_bits = recovered  # fallback (will produce garbled DID but at least won't crash)
+        if did_bit_len > 0 and did_bit_len <= len(raw_bits):
             did_bytes = bytearray()
             for i in range(0, did_bit_len, 8):
-                chunk = recovered[i:i+8]
+                chunk = raw_bits[i:i+8]
                 if len(chunk) == 8:
                     did_bytes.append(int(np.packbits(np.array(chunk, dtype=np.uint8))[0]))
-            extracted_did = did_bytes.decode('utf-8', errors='replace').rstrip('\x00')
+            extracted_did = did_bytes.decode('utf-8', errors='replace').rstrip('\x00').rstrip(chr(0))
         result['match'] = extracted_did == expected_did
         result['extracted_did'] = extracted_did
         # Calculate similarity
@@ -626,15 +634,27 @@ def api_wm_verify_uploaded():
             max_len = max(len(extracted_did), len(expected_did))
             same = sum(1 for a, b in zip(extracted_did, expected_did) if a == b)
             result['char_similarity'] = round(same / max_len, 3) if max_len > 0 else 0.0
-        # BER
+        # BER (compare with original_bits which are raw DID bits)
         expected_bits = np.array(p.get('original_bits', []), dtype=np.uint8)
         ber = 0.0
-        if len(expected_bits) > 0 and len(recovered) > 0:
-            n = min(len(expected_bits), len(recovered))
-            ber = float(np.sum(recovered[:n] != expected_bits[:n])) / n
+        if len(expected_bits) > 0 and len(raw_bits) > 0:
+            n = min(len(expected_bits), len(raw_bits))
+            ber = float(np.sum(raw_bits[:n] != expected_bits[:n])) / n
         result['ber'] = ber
         result['match_rate'] = 1.0 - ber
-        result['extract'] = {'did': extracted_did, 'mode': 'phfrfm', 'ber': ber, 'success': True}
+        result['ecc_errors'] = ecc_info.get('total_errors', 0)
+        result['ecc_corrected'] = ecc_info.get('corrected', 0)
+        result['ecc_failed'] = ecc_info.get('failed_blocks', 0)
+        result['ecc_raw_ber'] = ecc_info.get('raw_ber', 0.0)
+        result['extract'] = {
+            'did': extracted_did, 'mode': 'phfrfm', 'ber': ber,
+            'success': True, 'match': extracted_did == expected_did,
+            'char_similarity': result.get('char_similarity', 0.0),
+            'ecc_errors': ecc_info.get('total_errors', 0),
+            'ecc_corrected': ecc_info.get('corrected', 0),
+            'ecc_failed': ecc_info.get('failed_blocks', 0),
+            'ecc_raw_ber': round(ecc_info.get('raw_ber', 0.0), 4),
+        }
     else:
         key_arr = np.array(p.get('key', []), dtype=np.uint8)
         if len(key_arr) == 0:
