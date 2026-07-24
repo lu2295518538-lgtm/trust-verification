@@ -334,6 +334,8 @@ def api_reveal():
     if not r: return jsonify({'success':False,'error':'not found'}),404
     item = {k:v for k,v in dict(r).items() if v is not None}
     item['note'] = '承诺已揭示'
+    # alias for frontend which reads data.nonce
+    item['nonce'] = item.get('randomness', '')
     return jsonify({'success':True, **item})
 
 @app.route('/api/watermark/embed', methods=['POST'])
@@ -588,16 +590,35 @@ def api_wm_verify_uploaded():
         result['extract'] = ext
         # Compare with expected
         extracted_did = ext.get('did', '')
-        result['match'] = extracted_did == expected_did
         result['extracted_did'] = extracted_did
-        # Calculate similarity (how many chars match)
+
+        # 【BUG FIX】原 code 直接字符串相等比较
+        # 由于 256x256 小图布局只支持 ~205 位, 720 位嵌入的 DID 会在 ~205 之后丢失
+        # (旧 code ext_bits_did[:did_bit_len] 截断后, 后面位为 0)
+        # 改进: 字符级模糊匹配
+        match_score = 0.0
         if extracted_did and expected_did:
-            min_len = min(len(extracted_did), len(expected_did))
-            max_len = max(len(extracted_did), len(expected_did))
-            same = sum(1 for a, b in zip(extracted_did, expected_did) if a == b)
-            result['char_similarity'] = round(same / max_len, 3) if max_len > 0 else 0.0
+            # 清除 0x00 截断影响
+            ext_clean = extracted_did.replace('\x00', '').rstrip('\x00')
+            min_len = min(len(ext_clean), len(expected_did))
+            if min_len > 0:
+                same = sum(1 for a, b in zip(ext_clean, expected_did) if a == b)
+                match_score = same / len(expected_did)
+        result['char_similarity'] = round(match_score, 3)
+
+        # 容错匹配: 字符相似度 > 70% 视为匹配 (覆盖小图损失)
+        # 真实匹配 (字符串完全相等) > 95% 视为确定匹配
+        if extracted_did == expected_did:
+            result['match'] = True
+            result['match_confidence'] = 'exact'
+        elif match_score >= 0.70 and extracted_did.startswith('did:'):
+            result['match'] = True
+            result['match_confidence'] = 'fuzzy'
+        else:
+            result['match'] = False
+            result['match_confidence'] = 'none' 
     elif mode in ('zero', 'phfrfm'):
-        # PHFRFM zero watermark extract
+        # PHFRFM zero watermark extract (with ECC decode)
         key_arr = np.array(p.get('key', []), dtype=np.uint8)
         if len(key_arr) == 0:
             return jsonify({'success': False, 'error': '零水印密钥缺失'}), 400
@@ -613,12 +634,12 @@ def api_wm_verify_uploaded():
         ecc_pad = int(p.get('ecc_pad', 0))
         extracted_did = ''
         ecc_info = {'total_errors': 0, 'corrected': 0, 'failed_blocks': 0, 'raw_ber': 0.0, 'decode_error': ''}
-        # CRITICAL: recovered bits are ECC-encoded (812 bits), must decode to get raw DID bits (464)
+        # FIX: recovered bits are ECC-encoded (812 bits); must decode to get raw DID bits (464)
         try:
             raw_bits, ecc_info = decode_with_ecc(recovered, ecc_pad)
         except Exception as _ex:
             ecc_info['decode_error'] = str(_ex)[:80]
-            raw_bits = recovered  # fallback (will produce garbled DID but at least won't crash)
+            raw_bits = recovered  # fallback (will produce garbled DID but won't crash)
         if did_bit_len > 0 and did_bit_len <= len(raw_bits):
             did_bytes = bytearray()
             for i in range(0, did_bit_len, 8):
@@ -628,13 +649,13 @@ def api_wm_verify_uploaded():
             extracted_did = did_bytes.decode('utf-8', errors='replace').rstrip('\x00').rstrip(chr(0))
         result['match'] = extracted_did == expected_did
         result['extracted_did'] = extracted_did
-        # Calculate similarity
+        # Character similarity (compare with expected)
         if extracted_did and expected_did:
             min_len = min(len(extracted_did), len(expected_did))
             max_len = max(len(extracted_did), len(expected_did))
             same = sum(1 for a, b in zip(extracted_did, expected_did) if a == b)
             result['char_similarity'] = round(same / max_len, 3) if max_len > 0 else 0.0
-        # BER (compare with original_bits which are raw DID bits)
+        # BER: compare decoded raw_bits against original_bits (both 464-bit raw DID bits)
         expected_bits = np.array(p.get('original_bits', []), dtype=np.uint8)
         ber = 0.0
         if len(expected_bits) > 0 and len(raw_bits) > 0:
@@ -647,8 +668,8 @@ def api_wm_verify_uploaded():
         result['ecc_failed'] = ecc_info.get('failed_blocks', 0)
         result['ecc_raw_ber'] = ecc_info.get('raw_ber', 0.0)
         result['extract'] = {
-            'did': extracted_did, 'mode': 'phfrfm', 'ber': ber,
-            'success': True, 'match': extracted_did == expected_did,
+            'did': extracted_did, 'mode': 'phfrfm', 'ber': ber, 'success': True,
+            'match': extracted_did == expected_did,
             'char_similarity': result.get('char_similarity', 0.0),
             'ecc_errors': ecc_info.get('total_errors', 0),
             'ecc_corrected': ecc_info.get('corrected', 0),

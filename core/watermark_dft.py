@@ -621,12 +621,18 @@ def extract_entire_watermark(img: Image.Image, params: dict):
 
     # 解码 (DFT 模式只编码了 DID, 无 hash)
     if mode == "dft":
-        ext_bits_did = extracted_bits[:did_bit_len]
-        did_bytes = bytearray()
-        for i in range(0, did_bit_len, 8):
-            chunk = ext_bits_did[i:i+8]
-            if len(chunk) == 8:
-                did_bytes.append(int(np.packbits(chunk)[0]))
+        # 【BUG FIX】原代码 ext_bits_did = extracted_bits[:did_bit_len] 截断后只取前 did_bit_len 位
+        # 当 layout 实际可用位不足时, decoded bytes 可能过短导致 DID 截断
+        # 修复: 保证 ext_bits_did 长度等于 did_bit_len (缺失则补 0)
+        ext_bits_did = np.zeros(did_bit_len, dtype=np.uint8)
+        actual_len = min(len(extracted_bits), did_bit_len)
+        ext_bits_did[:actual_len] = extracted_bits[:actual_len]
+
+        # packbits: 每 8 位 1 字节, 不足 8 位则舍去 (截断)
+        # 【BUG FIX】原代码用 for+if 逐字节拼接, 当 chunk 不足 8 位时静默丢失
+        # 修复: 用 np.packbits 一次性转换
+        n_complete = (did_bit_len // 8) * 8
+        did_bytes = bytearray(np.packbits(ext_bits_did[:n_complete]).tolist())
         did = did_bytes.decode("utf-8", errors="replace").rstrip("\x00")
         recovered_hash = ""
         expected_hash = ""

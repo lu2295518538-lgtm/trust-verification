@@ -1019,7 +1019,7 @@ async function embedWatermark() {
     if (!resp.success) { showToast(resp.error, 'err'); return; }
 
     // Store params for later extraction
-    wmEmbedParams = { mode: mode, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [] };
+    wmEmbedParams = { mode: mode, did: did, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [], ecc_pad: resp.ecc_pad || 0, max_order: parseInt(document.getElementById('wm-order')?.value || 25), p: parseFloat(document.getElementById('wm-p')?.value || 0.3) };
 
     // Compute diff image SYNCHRONOUSLY using offscreen canvas with both images
     const diffCanvas = document.getElementById('wm-diff-canvas');
@@ -1281,10 +1281,7 @@ async function runCustomAttack() {
       original_bits_len: (wmEmbedParams.original_bits||[]).length,
       mode: wmEmbedParams.mode
     };
-    if (currentWmTextDid !== wmEmbedParams.did) {
-      console.warn('[DIAGNOSE-v2] MISMATCH: wm-text="' + currentWmTextDid + '" (len=' + currentWmTextDid.length + ') but wmEmbedParams.did="' + wmEmbedParams.did + '" (len=' + (wmEmbedParams.did||'').length + ')');
-      showToast('️ 输入框DID与已嵌入不一致,请重新点击「嵌入水印」', 'warn');
-    }
+    // Soft warn removed - verify always uses embedded DID
     console.log('[DIAGNOSE-v2] PARAMS sent:', JSON.stringify(window.__lastParams, null, 2));
     console.log('[v2026-07-23-02] custom_attack result:', result);
     if (!result.success) {
