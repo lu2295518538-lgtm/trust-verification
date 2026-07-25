@@ -1404,8 +1404,7 @@ async function init() {
   try { checkChain(); } catch (e) { console.error('Chain:', e); }
   try { initShareFromUrl(); } catch (e) { console.error('Share:', e); }
   try { initSidebarNav(); } catch (e) { console.error('Sidebar:', e); }
-  try { loadParties(); } catch (e) { console.error('Parties:', e); } console.error('Sidebar:', e);
-  try { loadIssuers(); } catch (e) { console.error('Issuers:', e); }
+  try { loadParties(); } catch (e) { console.error('Parties:', e);   try { loadIssuers(); } catch (e) { console.error('Issuers:', e); }
   try { renderCADirectory(); } catch (e) { console.error('CADir:', e); }
   try { renderIssuerInfo(); } catch (e) { console.error('IssuerInfo:', e); }
 }
@@ -1485,6 +1484,12 @@ function onVCSampleChange() {
 
 const dataTypeMap = { quarantine: '检疫数据', transaction: '交易数据', transport: '运输数据', slaughter: '屠宰数据' };
 
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function syntaxHL(obj) {
   if (typeof obj !== 'string') try { obj = JSON.stringify(obj, null, 2); } catch(e) { obj = String(obj); }
   return obj.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
@@ -1497,8 +1502,8 @@ function syntaxHL(obj) {
 async function buildVC() {
   // 清除旧结果，防止残留数据导致假阳性
   currentVC = null; currentVP = null;
-  [vc-output,vc-verify-output,vp-output,vp-verify-output].forEach(function(id){
-    var e=document.getElementById(id); if(e){e.style.display=none;e.innerHTML=;}
+  ['vc-output','vc-verify-output','vp-output','vp-verify-output'].forEach(function(id){
+    var e=document.getElementById(id); if(e){e.style.display='none';e.innerHTML='';}
   });
   const holder = (document.getElementById('vc-holder').value || '').trim();
   const dataId = (document.getElementById('vc-dataid').value || '').trim();
