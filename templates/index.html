@@ -1400,12 +1400,14 @@ async function init() {
   } catch (e) { console.error('Owner:', e); }
   try { loadRecords(); } catch (e) { console.error('Records:', e); }
   try { refreshKPIs(); } catch (e) { console.error('KPI:', e); }
+  try { loadTransport(); } catch (e) { console.error('Transport:', e); }
   try { checkChain(); } catch (e) { console.error('Chain:', e); }
   try { initShareFromUrl(); } catch (e) { console.error('Share:', e); }
   try { initSidebarNav(); } catch (e) { console.error('Sidebar:', e); }
   try { loadParties(); } catch (e) { console.error('Parties:', e); } console.error('Sidebar:', e);
   try { loadIssuers(); } catch (e) { console.error('Issuers:', e); }
   try { renderCADirectory(); } catch (e) { console.error('CADir:', e); }
+  try { renderIssuerInfo(); } catch (e) { console.error('IssuerInfo:', e); }
 }
 
 /* ─── Sidebar navigation ─── */
@@ -1483,7 +1485,21 @@ function onVCSampleChange() {
 
 const dataTypeMap = { quarantine: '检疫数据', transaction: '交易数据', transport: '运输数据', slaughter: '屠宰数据' };
 
+function syntaxHL(obj) {
+  if (typeof obj !== 'string') try { obj = JSON.stringify(obj, null, 2); } catch(e) { obj = String(obj); }
+  return obj.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/("(?:u[0-9a-f]{4}|[^"\]*)")\s*:/g, '<span style="color:#0550ae">$1</span>:')
+    .replace(/:\s*("(?:u[0-9a-f]{4}|[^"]*)")/g, ': <span style="color:#0a6e3c">$1</span>')
+    .replace(/:\s*(true|false|\d+\.?\d*)/g, ': <span style="color:#805080">$1</span>')
+    .replace(/\n/g, '<br>');
+}
+
 async function buildVC() {
+  // 清除旧结果，防止残留数据导致假阳性
+  currentVC = null; currentVP = null;
+  [vc-output,vc-verify-output,vp-output,vp-verify-output].forEach(function(id){
+    var e=document.getElementById(id); if(e){e.style.display=none;e.innerHTML=;}
+  });
   const holder = (document.getElementById('vc-holder').value || '').trim();
   const dataId = (document.getElementById('vc-dataid').value || '').trim();
   const sampleKey = document.getElementById('vc-sample-type').value;
@@ -2567,16 +2583,113 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ── 各数据类型的示例原始数据 ──
+
+/* ─── 运输管理 ─── */
+async function submitTransport() {
+  const btn = document.getElementById('t-submit');
+  const no = (document.getElementById('t-no').value || '').trim();
+  if (!no) { showToast('请填写运输编号', 'err'); return; }
+  setBusy(btn, true, '登记上链中…');
+  try {
+    const r = await securePost('/api/submit', {
+      raw_data: JSON.stringify({
+        '运输编号': no, '运输日期': document.getElementById('t-date').value || '',
+        '起运地': document.getElementById('t-from').value || '', '目的地': document.getElementById('t-to').value || '',
+        '动物种类': document.getElementById('t-kind').value || '', '数量': document.getElementById('t-qty').value || '',
+        '运输车辆': document.getElementById('t-vehicle').value || '', '司机': document.getElementById('t-driver').value || '',
+        '随车检疫证号': document.getElementById('t-cert').value || '', '计划到达': document.getElementById('t-arrive').value || '',
+        '运输条件': document.getElementById('t-cond').value || ''
+      }),
+      data_type: 'transport',
+      is_structured: true
+    });
+    const result = await r.json();
+    const box = document.getElementById('t-result');
+    box.style.display = 'block';
+    if (result.success) {
+      box.className = 'result ok';
+      box.innerHTML = '<div class="result-title">✓ 运输登记成功</div>'
+        + (result.step5_chainmaker && result.step5_chainmaker.success
+          ? '<div>链上 TX: ' + (result.step5_chainmaker.tx_id||'').substring(0,24) + '…  区块 #' + (result.step5_chainmaker.block_height||'–') + '</div>'
+          : '<div style="color:#b8860b">本地已保存，上链失败（链服务不可用）</div>');
+      showToast('运输登记' + (result.step5_chainmaker && result.step5_chainmaker.success ? '并上链成功' : '成功（本地）'), 'ok');
+      loadTransport(); refreshKPIs(); loadRecords();
+    } else {
+      box.className = 'result bad';
+      box.innerHTML = '<div class="result-title">✗ 登记失败</div><div>' + esc(result.error || '未知错误') + '</div>';
+      showToast(result.error || '登记失败', 'err');
+    }
+  } catch (e) {
+    if (!/^(401|403|429)$/.test((e.message||'').substring(0,3))) showToast('运输登记失败: ' + (e.message || e), 'err');
+  } finally { setBusy(btn, false, '登记并上链'); }
+}
+
+function resetTransport() {
+  ['t-no','t-date','t-from','t-to','t-kind','t-qty','t-vehicle','t-driver','t-cert','t-arrive','t-cond'].forEach(function(id) {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  const box = document.getElementById('t-result');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+async function loadTransport() {
+  const grid = document.getElementById('transport-grid');
+  if (!grid) return;
+  try {
+    const key = getApiKey() || '';
+    const r = await fetch('/api/records?page=1&per_page=10000', { headers: { 'X-API-Key': key } });
+    const data = await r.json();
+    const recs = Array.isArray(data) ? data : (data.records || []);
+    const trans = recs.filter(function(r) { return (r.data_type || '') === 'transport'; });
+    // KPI
+    const setT = function(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+    setT('tk-total', trans.length);
+    const linked = trans.filter(function(r) { var m = {}; try { m = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {}); } catch(e){} return !!(m['随车检疫证号'] || ''); });
+    setT('tk-linked', linked.length);
+    setT('tk-unlinked', trans.length - linked.length);
+    setT('tk-transit', trans.length); // 简化：全部视为在途（无单独状态字段）
+    // 列表
+    if (!trans.length) { grid.innerHTML = '<div class="transport-empty">暂无运输记录。填写左侧表单登记首条运输批次。</div>'; return; }
+    grid.innerHTML = trans.map(function(r) {
+      var m = {}; try { m = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {}); } catch(e) { m = {}; }
+      var biz = m.metadata || m;
+      return '<div class="transport-card">'
+        + '<div style="font-weight:600;color:var(--primary)">' + esc(biz['运输编号'] || r.data_did.substring(0,18)) + '</div>'
+        + '<div style="margin-top:4px;font-size:12px;color:var(--ink-3)">'
+        + (biz['起运地'] ? '从 ' + esc(biz['起运地']) : '')
+        + (biz['目的地'] ? ' → ' + esc(biz['目的地']) : '')
+        + '</div>'
+        + (biz['动物种类'] ? '<div>' + esc(biz['动物种类']) + ' · ' + esc(biz['数量']||'–') + ' 头</div>' : '')
+        + (r.chain_tx_id ? '<div style="font-size:11px;color:var(--ink-3);margin-top:4px">🔗 链上 #' + esc(String(r.block_height)) + '</div>' : '<div style="font-size:11px;color:#b8860b;margin-top:4px">⚠ 仅本地保存</div>')
+        + '</div>';
+    }).join('');
+  } catch(e) { console.error('[loadTransport]', e); grid.innerHTML = '<div class="transport-empty">加载失败</div>'; }
+}
+
 /* ─── 业务追溯 ─── */
 function runTrace() {
   const q = (document.getElementById('trace-q').value || '').trim();
   const box = document.getElementById('trace-result');
   if (!q) { box.innerHTML = '<p class="trace-empty">请输入检疫编号 / 批次号 / DID。</p>'; return; }
   box.innerHTML = '<p class="trace-empty">追溯中…</p>';
-  fetch('/api/records/trace?q=' + encodeURIComponent(q))
-    .then(function (r) { return r.json(); })
+  // 使用 AbortController 实现 15 秒超时
+  const controller = new AbortController();
+  const timer = setTimeout(function() { controller.abort(); }, 15000);
+  fetch('/api/records/trace?q=' + encodeURIComponent(q), { signal: controller.signal })
+    .then(function (r) {
+      clearTimeout(timer);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
     .then(function (d) { renderTrace(d); })
-    .catch(function (e) { box.innerHTML = '<p class="trace-empty">追溯失败：' + esc(e.message) + '</p>'; });
+    .catch(function (e) {
+      clearTimeout(timer);
+      if (e.name === 'AbortError') {
+        box.innerHTML = '<p class="trace-empty">⏱ 追溯请求超时（15秒）。后端可能正在连接长安链，请稍后重试。</p>';
+      } else {
+        box.innerHTML = '<p class="trace-empty">追溯失败：' + esc(e.message || e) + '</p>';
+      }
+    });
 }
 
 function renderTrace(d) {
