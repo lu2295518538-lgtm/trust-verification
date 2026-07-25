@@ -1492,11 +1492,21 @@ function esc(s) {
 
 function syntaxHL(obj) {
   if (typeof obj !== 'string') try { obj = JSON.stringify(obj, null, 2); } catch(e) { obj = String(obj); }
-  return obj.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/("(?:u[0-9a-f]{4}|[^"\]*)")\s*:/g, '<span style="color:#0550ae">$1</span>:')
-    .replace(/:\s*("(?:u[0-9a-f]{4}|[^"]*)")/g, ': <span style="color:#0a6e3c">$1</span>')
-    .replace(/:\s*(true|false|\d+\.?\d*)/g, ': <span style="color:#805080">$1</span>')
-    .replace(/\n/g, '<br>');
+  var t = String(obj);
+  t = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  var lines = t.split('\n');
+  var out = [];
+  for (var li = 0; li < lines.length; li++) {
+    var line = lines[li];
+    // Color keys (before colon): find "key": pattern
+    line = line.replace(/^(\s*)(".*?")(\s*:)/g, '$1<span style="color:#0550ae">$2</span>$3');
+    // Color string values (after colon)
+    line = line.replace(/(:\s*)(".*?")(\s*[,\}]?)/g, '$1<span style="color:#0a6e3c">$2</span>$3');
+    // Color booleans and numbers
+    line = line.replace(/(:\s*)(true|false|null|\d+\.?\d*)(\s*[,\}]?)/g, '$1<span style="color:#805080">$2</span>$3');
+    out.push(line);
+  }
+  return out.join('<br>');
 }
 
 async function buildVC() {
@@ -2432,7 +2442,7 @@ async function embedWatermark() {
     if (!resp.success) { showToast(resp.error, 'err'); return; }
 
     // Store params for later extraction
-    wmEmbedParams = { mode: mode, did: did, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [], ecc_pad: resp.ecc_pad || 0, max_order: parseInt(document.getElementById('wm-order')?.value || 25), p: parseFloat(document.getElementById('wm-p')?.value || 0.3) };
+    wmEmbedParams = { mode: mode, did: did, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [], ecc_pad: resp.ecc_pad || 0, max_order: parseInt((document.getElementById('wm-order')||{}).value || 25), p: parseFloat((document.getElementById('wm-p')||{}).value || 0.3) };
     wmWatermarkedImage = resp.watermarked_image;
     const exBtn = document.getElementById('btn-extract-wm'); if (exBtn) exBtn.disabled = false;
 
@@ -2880,7 +2890,7 @@ async function runCustomAttack() {
     console.log('[DIAGNOSE-v2] FULL result:', JSON.stringify(result, null, 2));
     window.__lastResult = result;
     // CRITICAL FIX: Read current wm-text value, not stale wmEmbedParams.did
-    const currentWmTextDid = (document.getElementById('wm-text')?.value || '').trim();
+    const currentWmTextDid = ((document.getElementById('wm-text')||{}).value || '').trim();
     window.__lastParams = {
       attack_params: params,
       sent_did_from_wmEmbedParams: wmEmbedParams.did,
@@ -2903,9 +2913,9 @@ async function runCustomAttack() {
     const ext = result.extract || {};
     console.log('[v2026-07-23-02] ext.match:', ext.match, 'ext.char_similarity:', ext.char_similarity, 'ext.did:', ext.did);
     const extractedDid = (ext.did || '').replace(/[^\x20-\x7e]/g, '?');
-    const expectedDid = (document.getElementById('wm-text')?.value || wmEmbedParams?.did || '').trim();
+    const expectedDid = (((document.getElementById('wm-text')||{}).value) || (wmEmbedParams||{}).did || '').trim();
     // Use backend-computed match as primary, fallback to JS comparison
-    const fpOk = (ext.match !== undefined ? ext.match : false) || (ext.did === wmEmbedParams?.did);
+    const fpOk = (ext.match !== undefined ? ext.match : false) || (ext.did === (wmEmbedParams||{}).did);
     const isValidText = /^did:/.test(ext.did || '');
 
     // 字符相似度 - 优先用后端计算的值
@@ -2913,7 +2923,7 @@ async function runCustomAttack() {
     if (ext.char_similarity !== undefined && ext.char_similarity !== null) {
       simPct = Math.round(ext.char_similarity * 100);
     } else {
-      let same = 0, total = Math.max(ext.did?.length || 0, expectedDid.length);
+      let same = 0, total = Math.max((ext.did||0).length || 0, expectedDid.length);
       for (let i = 0; i < Math.min((ext.did||'').length, expectedDid.length); i++) {
         if (ext.did[i] === expectedDid[i]) same++;
       }
