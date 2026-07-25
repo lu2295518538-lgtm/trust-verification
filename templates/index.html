@@ -1404,7 +1404,7 @@ async function init() {
   try { checkChain(); } catch (e) { console.error('Chain:', e); }
   try { initShareFromUrl(); } catch (e) { console.error('Share:', e); }
   try { initSidebarNav(); } catch (e) { console.error('Sidebar:', e); }
-  try { loadParties(); } catch (e) { console.error('Parties:', e);   try { loadIssuers(); } catch (e) { console.error('Issuers:', e); }
+  try { loadParties(); } catch (e) { console.error('Parties:', e);   try { loadIssuers(); } catch (e) { console.error('Issuers:', e); } }
   try { renderCADirectory(); } catch (e) { console.error('CADir:', e); }
   try { renderIssuerInfo(); } catch (e) { console.error('IssuerInfo:', e); }
 }
