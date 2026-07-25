@@ -36,6 +36,11 @@
   --danger: oklch(55% 0.18 25);
   --danger-soft: oklch(96% 0.03 25);
 
+  /* Accent — restrained blue for selection / batch UI */
+  --accent: oklch(48% 0.09 240);
+  --accent-soft: oklch(96% 0.025 240);
+  --accent-text: oklch(42% 0.10 240);
+
   /* Type scale */
   --t-display: clamp(1.75rem, 3.5vw, 2.25rem);
   --t-h1: 1.375rem;
@@ -73,6 +78,11 @@ body {
 .topbar {
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+  position: relative;
+}
+.topbar::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--primary-2) 55%, var(--accent));
 }
 .topbar-inner {
   max-width: 1180px; margin: 0 auto; padding: 18px 32px;
@@ -101,8 +111,115 @@ body {
   padding: 3px 8px; border-radius: var(--r-sm); background: var(--surface-soft); letter-spacing: 0.02em;
 }
 
+/* ─── Sidebar navigation ─── */
+.app-layout { display: flex; min-height: calc(100vh - 57px); }
+.sidebar {
+  width: 216px; flex-shrink: 0;
+  background: oklch(24% 0.015 165);  /* deep forest */
+  color: oklch(92% 0.01 85);
+  padding: 24px 0 32px;
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: calc(100vh - 57px); overflow-y: auto;
+  transition: margin-left 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar-brand {
+  padding: 0 20px 20px;
+  border-bottom: 1px solid oklch(100% 0 0 / 0.08);
+  margin-bottom: 16px;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+}
+.sidebar-brand .sb-mark {
+  font-family: 'DM Serif Display', serif; font-size: 1.15rem;
+  color: #fff; letter-spacing: -0.01em;
+}
+.sidebar-brand .sb-sub {
+  font-size: 0.68rem; color: oklch(75% 0.02 165);
+  text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px;
+}
+.nav-list { list-style: none; padding: 0 10px; flex: 1; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; margin-bottom: 2px;
+  border-radius: 8px;
+  font-size: 0.855rem; font-weight: 500;
+  color: oklch(82% 0.01 85);
+  text-decoration: none; cursor: pointer;
+  transition: all 0.15s ease;
+}
+.nav-item:hover {
+  background: oklch(100% 0 0 / 0.08);
+  color: #fff;
+}
+.nav-item.active {
+  background: oklch(100% 0 0 / 0.14);
+  color: #fff;
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.nav-label { white-space: nowrap; }
+
+/* sidebar footer */
+.sidebar-footer {
+  padding: 16px 20px 0;
+  border-top: 1px solid oklch(100% 0 0 / 0.08);
+  font-size: 0.7rem; color: oklch(60% 0.015 165);
+  line-height: 1.5;
+}
+
+/* ─── Main content area ─── */
+/* ─── Sidebar collapse (hide) ─── */
+.sidebar-collapsed .sidebar { margin-left: -216px; }
+.sidebar-collapse-btn {
+  background: transparent; border: 0; cursor: pointer;
+  color: oklch(68% 0.02 165); font-size: 1.5rem; line-height: 1;
+  padding: 0 4px; border-radius: 6px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.sidebar-collapse-btn:hover { color: #fff; background: oklch(100% 0 0 / 0.1); }
+#sidebar-fab {
+  display: none; position: fixed; top: 66px; left: 14px; z-index: 60;
+  width: 40px; height: 40px; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  cursor: pointer; color: var(--ink);
+  box-shadow: 0 4px 16px oklch(0% 0 0 / 0.12);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+#sidebar-fab:hover { border-color: var(--primary); color: var(--primary); }
+.sidebar-collapsed #sidebar-fab { display: inline-flex; }
+
+.main-content { flex: 1; min-width: 0; }
+
+/* mobile: collapse sidebar to hamburger */
+@media (max-width: 900px) {
+  .app-layout { flex-direction: column; }
+  .sidebar {
+    width: 100%; height: auto; position: relative;
+    padding: 12px 0 16px;
+  }
+  .sidebar-brand { display: none; }
+  .sidebar-footer { display: none; }
+  .nav-list { display: flex; overflow-x: auto; gap: 4px; padding: 0 12px; }
+  .nav-item { white-space: nowrap; padding: 8px 12px; font-size: 0.81rem; border-radius: 6px; }
+  .nav-item.active { box-shadow: inset 3px 0 0 var(--primary), 0 1px 4px oklch(0% 0 0 / 0.06); }
+  .sidebar-collapse-btn { display: none; }
+  .sidebar-collapsed .sidebar { margin-left: 0; }
+  #sidebar-fab { display: none !important; }
+}
+
 /* ─── Page container ─── */
 .page { max-width: 1180px; margin: 0 auto; padding: 36px 32px 80px; }
+
+/* ─── KPI summary band ─── */
+.kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+@media (max-width: 720px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } }
+.kpi-card {
+  padding: 16px 18px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); box-shadow: var(--shadow-1); position: relative; overflow: hidden;
+}
+.kpi-card::after { content: ''; position: absolute; right: -12px; top: -12px; width: 56px; height: 56px; border-radius: 50%; background: var(--primary-soft); opacity: 0.7; }
+.kpi-label { font-size: var(--t-micro); color: var(--ink-3); letter-spacing: 0.04em; }
+.kpi-val { font-size: 1.6rem; font-weight: 700; color: var(--ink); font-family: 'JetBrains Mono', monospace; line-height: 1.2; margin-top: 4px; letter-spacing: -0.02em; }
+.kpi-val .unit { font-size: 0.72rem; font-weight: 500; color: var(--ink-3); margin-left: 3px; font-family: 'Inter', sans-serif; }
+.kpi-card.accent .kpi-val { color: var(--primary); }
 
 /* ─── Auth bar — single subtle row ─── */
 .auth-row {
@@ -121,12 +238,25 @@ body {
 }
 .auth-row input:focus { border-color: var(--primary); }
 .auth-row .auth-note { color: var(--ink-3); font-size: var(--t-micro); margin-left: auto; }
+.auth-row .auth-status { margin-left: 10px; font-size: var(--t-micro); display: inline-flex; align-items: center; gap: 4px; }
+.auth-row .auth-status.ok { color: var(--success); font-weight: 600; }
+.auth-row .auth-status.bad { color: var(--danger); font-weight: 600; }
+.auth-row .auth-status.checking { color: var(--ink-3); }
+.auth-row input.bad { border-color: var(--danger); }
 
-/* ─── Section label ─── */
-.section { margin-bottom: 48px; }
+/* ─── Section card ─── */
+.section {
+  margin-bottom: 22px; padding: 26px 28px 30px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+}
 .section-head {
   display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
-  margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line);
+  margin-bottom: 20px; padding-left: 14px; position: relative;
+}
+.section-head::before {
+  content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 4px;
+  border-radius: 4px; background: linear-gradient(180deg, var(--primary), var(--primary-2));
 }
 .section-num {
   font-size: var(--t-micro); font-weight: 600; color: var(--ink-3);
@@ -176,6 +306,36 @@ body {
 .btn-outline:hover:not(:disabled) { border-color: var(--ink-3); color: var(--ink); }
 
 .btn-sm { padding: 5px 10px; font-size: var(--t-small); }
+
+/* ─── 业务追溯 ─── */
+.section-sub { font-size: var(--t-small); color: var(--ink-3); margin-top: 6px; max-width: 780px; line-height: 1.6; }
+.trace-panel { background: var(--surface); border: 1px solid var(--line-2); border-radius: 16px; padding: 20px; }
+.trace-search { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.trace-search .input, .trace-search input { flex: 1; min-width: 240px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface); color: var(--ink); font-size: 0.95rem; font-family: inherit; }
+.trace-search .input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.trace-hint { font-size: var(--t-small); color: var(--ink-3); margin: 8px 0 0; }
+.trace-hint b { color: var(--primary-2); }
+.stage-flow { display: flex; flex-wrap: wrap; align-items: center; margin: 18px 0 4px; }
+.stage-node { display: flex; align-items: center; }
+.stage-dot { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 700; border: 2px solid var(--line-2); color: var(--ink-3); background: var(--primary-soft); flex: none; }
+.stage-node.done .stage-dot { background: var(--primary); border-color: var(--primary); color: #fff; }
+.stage-node.blocked .stage-dot, .stage-node.required .stage-dot { background: #e5484d; border-color: #e5484d; color: #fff; }
+.stage-label { font-size: 0.78rem; margin-left: 8px; color: var(--ink-3); white-space: nowrap; }
+.stage-node.done .stage-label { color: var(--ink); font-weight: 600; }
+.stage-line { flex: 1 1 18px; min-width: 18px; height: 2px; background: var(--line-2); margin: 0 6px; }
+.stage-line.filled { background: var(--primary); }
+.trace-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; margin: 14px 0 4px; }
+.trace-badge.ok { background: var(--primary-soft); color: var(--primary-2); }
+.trace-badge.gap { background: #fff4e5; color: #b25e09; }
+.trace-badge.fail { background: #fdecec; color: #e5484d; }
+.trace-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 14px; }
+.trace-card { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; background: var(--surface); }
+.trace-card .tc-type { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--primary); }
+.trace-card .tc-title { font-size: 0.95rem; font-weight: 600; color: var(--ink); margin-top: 4px; }
+.trace-card .tc-row { font-size: 0.82rem; color: var(--ink-2); margin-top: 4px; }
+.trace-card .tc-did { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: var(--ink-3); margin-top: 8px; word-break: break-all; }
+.trace-empty { color: var(--ink-3); font-size: 0.92rem; padding: 18px 0; line-height: 1.7; }
+.trace-empty b { color: var(--primary-2); }
 
 .btn-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
@@ -346,10 +506,136 @@ body {
 .table td { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--ink-2); font-family: 'JetBrains Mono', monospace; font-size: var(--t-small); }
 .table tr:last-child td { border-bottom: none; }
 .table tr:hover td { background: var(--surface-soft); }
+.table tbody tr:nth-child(even) td { background: var(--surface-soft); }
+.table tbody tr:nth-child(even):hover td { background: var(--accent-soft); }
 .table .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: var(--t-micro); font-weight: 500; }
 .table .pill.ok { background: var(--success-soft); color: oklch(35% 0.10 150); }
 .table .pill.muted { background: var(--surface-soft); color: var(--ink-3); }
 .table .num { font-variant-numeric: tabular-nums; }
+.table td.col-check, .table th.col-check { width: 38px; text-align: center; font-family: inherit; }
+.table tbody tr.selected td { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.table tbody tr.selected:hover td { background: var(--accent-soft); }
+.rec-check { width: 16px; height: 16px; cursor: pointer; accent-color: var(--accent); }
+
+/* ─── VC·VP info tables ─── */
+.vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 18px; }
+@media (max-width: 780px) { .vc-grid { grid-template-columns: 1fr; } }
+.vc-card {
+  background: var(--surface-soft); border: 1px solid var(--line);
+  border-radius: var(--r); overflow: hidden;
+}
+.vc-card-head {
+  padding: 12px 16px; font-size: var(--t-small); font-weight: 600;
+  color: var(--ink); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 8px;
+}
+.vc-card-head::before {
+  content: ''; width: 3px; height: 14px; border-radius: 2px;
+  background: var(--primary); flex-shrink: 0;
+}
+.vc-table { width: 100%; border-collapse: collapse; font-size: var(--t-small); }
+.vc-table th {
+  text-align: left; padding: 9px 14px; color: var(--ink-3);
+  font-weight: 500; font-size: var(--t-micro);
+  background: oklch(97% 0.005 85); border-bottom: 1px solid var(--line);
+}
+.vc-table td {
+  padding: 9px 14px; border-bottom: 1px solid var(--line);
+  color: var(--ink-2); font-size: var(--t-small); vertical-align: top;
+}
+.vc-table tr:last-child td { border-bottom: none; }
+.vc-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 999px; font-size: var(--t-micro); font-weight: 600;
+}
+.vc-badge.yes { background: oklch(94% 0.04 150); color: oklch(35% 0.1 150); }
+.vc-badge.partial { background: oklch(94% 0.04 75); color: oklch(45% 0.12 75); }
+.vc-badge.no { background: oklch(94% 0.04 25); color: oklch(50% 0.15 25); }
+.vc-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  background: var(--primary-soft); color: var(--primary);
+  font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; font-weight: 500;
+}
+.vc-note { font-size: var(--t-micro); color: var(--ink-3); margin-top: 2px; }
+.vc-privacy-bar {
+  display: flex; gap: 6px; margin-top: 4px;
+}
+.vc-privacy-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 5px;
+}
+.vc-privacy-dot.high { background: var(--success); box-shadow: 0 0 0 3px oklch(95% 0.03 150); }
+.vc-privacy-dot.mid { background: var(--warning); box-shadow: 0 0 0 3px oklch(95% 0.04 75); }
+.vc-privacy-dot.low { background: var(--danger); box-shadow: 0 0 0 3px oklch(95% 0.03 25); }
+
+/* ─── VC·VP interactive construction demo ─── */
+.vc-demo-head {
+  display: flex; align-items: center; gap: 8px;
+  margin: 28px 0 14px; font-size: var(--t-h2); font-weight: 600; color: var(--ink);
+}
+.vc-demo-head::before {
+  content: ''; width: 3px; height: 16px; border-radius: 2px; background: var(--primary);
+}
+.vc-demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 920px) { .vc-demo-grid { grid-template-columns: 1fr; } }
+.vc-demo-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 20px;
+}
+.vc-demo-card h3 {
+  font-size: var(--t-small); font-weight: 600; color: var(--ink);
+  margin-bottom: 14px; display: flex; align-items: center; gap: 6px;
+}
+.vc-demo-card h3 .badge-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--primary); color: #fff; font-size: 0.7rem; font-weight: 700;
+}
+.code-box {
+  margin-top: 14px; background: oklch(24% 0.015 165); color: oklch(92% 0.01 85);
+  border-radius: var(--r); padding: 14px 16px; font-family: 'JetBrains Mono', monospace;
+  font-size: 0.74rem; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+  max-height: 320px; overflow-y: auto;
+}
+.code-box .k { color: oklch(72% 0.1 165); }
+.code-box .s { color: oklch(80% 0.1 75); }
+.code-box .n { color: oklch(78% 0.1 240); }
+.claim-check {
+  display: flex; flex-direction: column; gap: 6px; margin: 10px 0;
+  padding: 10px 12px; background: var(--surface-soft);
+  border: 1px solid var(--line); border-radius: var(--r);
+}
+.claim-check label {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--t-small); color: var(--ink-2); cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+}
+.claim-check input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--primary); cursor: pointer; }
+.vc-hint { font-size: var(--t-micro); color: var(--ink-3); margin-top: 6px; line-height: 1.5; }
+
+/* ─── Batch operation bar ─── */
+.batch-bar {
+  display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px; padding: 10px 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  box-shadow: var(--shadow-1);
+}
+.batch-bar.show { display: flex; }
+.batch-bar .batch-count { font-size: var(--t-small); color: var(--ink-2); }
+.batch-bar .batch-count b { color: var(--accent); font-size: var(--t-base); }
+.batch-bar .batch-spacer { flex: 1; }
+.batch-bar .batch-info { font-size: var(--t-micro); color: var(--ink-3); }
+
+/* ─── Share panel ─── */
+.share-panel {
+  display: none; margin-bottom: 14px; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--line-2); border-radius: var(--r);
+}
+.share-panel.show { display: block; }
+.share-card { padding: 10px 12px; margin: 8px 0; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-soft); }
+.share-card .sc-title { font-size: var(--t-small); font-weight: 600; color: var(--ink); }
+.share-card .sc-meta { font-size: var(--t-micro); color: var(--ink-3); margin-top: 4px; font-family: 'JetBrains Mono', monospace; word-break: break-all; }
+.share-ok { color: oklch(35% 0.10 150); }
+.share-bad { color: oklch(35% 0.14 25); }
 
 /* ─── Toast ─── */
 .toast {
@@ -394,7 +680,42 @@ body {
 </head>
 <body>
 
+<!-- ─── App layout: sidebar + main ─── -->
+<div class="app-layout">
 
+  <!-- ─── Sidebar nav ─── -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div>
+        <div class="sb-mark">畜牧·确权</div>
+        <div class="sb-sub">Livestock Data Trust</div>
+      </div>
+      <button class="sidebar-collapse-btn" onclick="toggleSidebar()" title="收起导航" aria-label="收起导航">&lsaquo;</button>
+    </div>
+    <ul class="nav-list">
+      <li><a class="nav-item active" data-target="kpi-row" href="#dashboard"><span class="nav-label">数据概览</span></a></li>
+      <li><a class="nav-item" data-target="sec-commit" href="#commit"><span class="nav-label">上链存证</span></a></li>
+      <li><a class="nav-item" data-target="sec-verify" href="#verify"><span class="nav-label">四重验证</span></a></li>
+      <li><a class="nav-item" data-target="sec-watermark" href="#watermark"><span class="nav-label">隐水印</span></a></li>
+      <li><a class="nav-item" data-target="sec-records" href="#records"><span class="nav-label">存证记录</span></a></li>
+      <li><a class="nav-item" data-target="sec-trace" href="#trace"><span class="nav-label">业务追溯</span></a></li>
+      <li><a class="nav-item" data-target="sec-transport" href="#transport"><span class="nav-label">运输管理</span></a></li>
+      <li><a class="nav-item" data-target="sec-vcvp" href="#vcvp"><span class="nav-label">VC·VP</span></a></li>
+      <li><a class="nav-item" data-target="sec-ca" href="#ca"><span class="nav-label">签发者目录</span></a></li>
+    </ul>
+    <div class="sidebar-footer">
+      SM3 · SM2 · Pedersen<br>长安链可信验证
+    </div>
+  </nav>
+
+  <button id="sidebar-fab" onclick="toggleSidebar()" title="展开导航" aria-label="展开导航">
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <path d="M2.5 4.5h13M2.5 9h13M2.5 13.5h13"/>
+    </svg>
+  </button>
+
+  <!-- ─── Main content ─── -->
+  <div class="main-content">
 
 
 
@@ -427,12 +748,21 @@ body {
   <!-- Auth row -->
   <div class="auth-row">
     <label for="api-key-input">API Key</label>
-    <input type="text" id="api-key-input" value="lk-2026-trust-verification-key">
-    <span class="auth-note" id="auth-status">认证就绪</span>
+    <input type="text" id="api-key-input" value="lk-2026-trust-verification-key" oninput="onApiKeyInput()" autocomplete="off" spellcheck="false">
+    <span class="auth-status ok" id="auth-status">● 已认证</span>
+    <span class="auth-note">所有写操作需经 API Key · CSRF · 频率三层校验</span>
+  </div>
+
+  <!-- KPI summary -->
+  <div class="kpi-row" id="kpi-row">
+    <div class="kpi-card accent"><div class="kpi-label">存证总数</div><div class="kpi-val" id="kpi-total">–</div></div>
+    <div class="kpi-card"><div class="kpi-label">已上链</div><div class="kpi-val" id="kpi-onchain">–</div></div>
+    <div class="kpi-card"><div class="kpi-label">最近存证</div><div class="kpi-val" id="kpi-latest" style="font-size:1rem;">–</div></div>
+    <div class="kpi-card"><div class="kpi-label">链高度</div><div class="kpi-val" id="kpi-height">–</div></div>
   </div>
 
   <!-- Section 1: Submit -->
-  <div class="section">
+  <div class="section" id="sec-commit">
     <div class="section-head">
       <div>
         <span class="section-num">01 / 上链存证</span>
@@ -445,7 +775,7 @@ body {
       <div>
         <div class="field">
           <label class="field-label" for="data-type">数据类型</label>
-          <select id="data-type" class="select">
+          <select id="data-type" class="select" onchange="onDataTypeChange()">
             <option value="quarantine">检疫记录</option>
             <option value="transaction">交易记录</option>
             <option value="transport">运输记录</option>
@@ -453,9 +783,22 @@ body {
           </select>
         </div>
         <div class="field">
+          <label class="field-label" for="party-select">关联主体</label>
+          <select id="party-select" class="select" onchange="onPartySelect()">
+            <option value="">— 选择养殖场 / 屠宰场 / 官方兽医 —</option>
+          </select>
+          <div class="field-hint">从主数据目录选择，自动填充主体信息（含统一社会信用代码）</div>
+          <div id="party-trust" class="field-hint"></div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="cert-no">检疫证号</label>
+          <input id="cert-no" class="input" type="text" placeholder="JC2026-00158" oninput="onCertInput()">
+          <div class="field-hint" id="cert-hint">格式：JC + 年份(4位) + - + 编号；将被写入存证并参与业务追溯关联</div>
+        </div>
+        <div class="field">
           <label class="field-label" for="raw-data">原始数据</label>
-          <textarea id="raw-data" class="textarea">检疫编号: JC2024-00158
-检疫日期: 2024-01-15
+          <textarea id="raw-data" class="textarea">检疫编号: JC2026-00158
+检疫日期: 2026-01-15
 检疫机构: XX市畜牧兽医检疫站
 检疫结果: 合格
 动物种类: 肉牛
@@ -463,7 +806,7 @@ body {
 养殖场名称: XX生态养殖场
 养殖场地址: XX省XX市XX县XX镇
 检疫员: 张XX
-有效期至: 2024-07-15</textarea>
+有效期至: 2026-07-15</textarea>
           <div class="field-hint">将作为 SM3 指纹的输入数据</div>
         </div>
         <div class="btn-row">
@@ -480,7 +823,7 @@ body {
   </div>
 
   <!-- Section 2: Verify -->
-  <div class="section">
+  <div class="section" id="sec-verify">
     <div class="section-head">
       <div>
         <span class="section-num">02 / 四重验证</span>
@@ -516,7 +859,7 @@ body {
   </div>
 
   <!-- Section 3: Watermark (Upgraded: DFT/Zero + Compare + Eval + Attack) -->
-  <div class="section">
+  <div class="section" id="sec-watermark">
     <div class="section-head">
       <div>
         <span class="section-num">03 / 隐水印</span>
@@ -556,8 +899,10 @@ body {
       <input type="text" id="wm-text" class="input" placeholder="did:trust:livestock:data:XXXX" readonly>
       <button class="btn btn-primary btn-sm" id="btn-embed-wm" onclick="embedWatermark()" disabled>嵌入水印</button>
       <a id="wm-download" class="btn btn-outline btn-sm" style="display:none;" download="watermarked.png">下载</a>
+      <button class="btn btn-outline btn-sm" id="btn-extract-wm" onclick="extractWatermark()" disabled>提取水印</button>
     </div>
     <div class="wm-info" id="wm-info"></div>
+    <div class="verify-result" id="wm-extract-result" style="display:none;"></div>
 
     <!-- Evaluation Panel -->
     <div class="eval-panel" id="eval-panel">
@@ -621,7 +966,7 @@ body {
   </div>
 
   <!-- Section 4: Records -->
-  <div class="section">
+  <div class="section" id="sec-records">
     <div class="section-head">
       <div>
         <span class="section-num">04 / 存证记录</span>
@@ -629,10 +974,23 @@ body {
       </div>
       <button class="btn btn-ghost btn-sm" onclick="loadRecords()">刷新</button>
     </div>
+
+    <div class="batch-bar" id="batch-bar">
+      <span class="batch-count">已选 <b id="batch-count">0</b> 条</span>
+      <button class="btn btn-primary btn-sm" onclick="batchVerify()">批量验证</button>
+      <button class="btn btn-ghost btn-sm" onclick="batchReveal()">批量揭示</button>
+      <button class="btn btn-ghost btn-sm" onclick="batchExport()">导出 CSV</button>
+      <button class="btn btn-ghost btn-sm" onclick="batchShare()">生成分享</button>
+      <span class="batch-spacer"></span>
+      <span class="batch-info" id="batch-info"></span>
+      <button class="btn btn-ghost btn-sm" onclick="clearSelection()">清空选择</button>
+    </div>
+
     <div style="overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); background:var(--surface);">
       <table class="table" id="records-table">
         <thead>
           <tr>
+            <th class="col-check"><input type="checkbox" id="select-all" class="rec-check" onchange="toggleSelectAll(this)" title="全选本页"></th>
             <th>数据 DID</th>
             <th>类型</th>
             <th>算法</th>
@@ -648,8 +1006,301 @@ body {
       </table>
     </div>
     <div id="records-pagination" style="margin-top:12px;padding:0 4px;display:block;min-height:32px;"></div>
+
+    <div class="share-panel" id="share-panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <span style="font-size:var(--t-small);font-weight:600;color:var(--ink);">🔗 共享存证（来自分享链接）</span>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('share-panel').classList.remove('show')">关闭</button>
+      </div>
+      <div id="share-cards"></div>
+    </div>
   </div>
 </div>
+
+  <!-- Section 5: VC·VP -->
+  <div class="section" id="sec-trace">
+    <div class="section-head">
+      <span class="section-num">05 / 业务追溯</span>
+      <h2 class="section-title">业务追溯</h2>
+      <p class="section-sub">将分散的存证记录按“检疫编号”串联成完整业务链路，映射现实中的 申报 → 产地检疫 → 出证 → 交易 → 运输 → 屠宰 状态机。同一批次在流通各环节以检疫编号互相引用，系统据此自动拼装全链路并标注缺口。</p>
+    </div>
+
+    <div class="trace-panel">
+      <div class="trace-search">
+        <input id="trace-q" class="input" type="text" placeholder="输入检疫编号 / 批次号 / DID，如 JC2026-DEMO01" />
+        <button class="btn btn-primary" id="trace-btn" onclick="runTrace()">追溯链路</button>
+      </div>
+      <p class="trace-hint">提示：可尝试链上演示批次 <b>JC2026-DEMO01</b>（申报→出证→交易→运输→屠宰 全链路已打通）。</p>
+      <div id="trace-result"></div>
+    </div>
+  </div>
+
+  <!-- Section: Transport -->
+  <div class="section" id="sec-transport">
+    <style>
+      .transport-list-head{display:flex;justify-content:space-between;align-items:center;margin:26px 0 14px;}
+      .block-sub{font-size:15px;font-weight:600;color:var(--ink);margin:0;}
+      .transport-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:16px;}
+      .transport-card{border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:var(--surface);transition:box-shadow .15s,border-color .15s;}
+      .transport-card:hover{box-shadow:0 6px 22px rgba(15,40,30,.10);border-color:var(--primary);}
+      .tc-head{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+      .tc-no{font-weight:700;color:var(--ink);font-size:15px;font-family:'JetBrains Mono',monospace;}
+      .tc-route{margin:8px 0 6px;color:var(--ink-2);font-size:13px;}
+      .tc-route .arrow{color:var(--primary);margin:0 4px;}
+      .tc-meta{font-size:12px;color:var(--ink-3);line-height:1.7;word-break:break-all;}
+      .tc-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;}
+      .t-cert{font-size:12px;color:var(--primary);cursor:pointer;border:1px dashed var(--primary);padding:2px 8px;border-radius:20px;background:var(--primary-soft);}
+      .t-cert:hover{background:var(--primary);color:#fff;}
+      .t-cert.muted{color:var(--ink-3);cursor:default;border-color:var(--line);background:transparent;}
+      .t-link{font-size:11px;font-weight:600;white-space:nowrap;}
+      .t-link.ok{color:#15803d;} .t-link.bad{color:#b91c1c;}
+      .t-badge{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;white-space:nowrap;}
+      .t-badge.transit{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;}
+      .t-badge.arrived{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;}
+      .t-badge.unknown{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;}
+      .transport-empty{padding:24px;color:var(--ink-3);font-size:13px;text-align:center;border:1px dashed var(--line);border-radius:12px;}
+      @media (max-width:640px){ .transport-grid{grid-template-columns:1fr;} }
+    </style>
+    <div class="section-head">
+      <div>
+        <span class="section-num">06 / 运输管理</span>
+        <h2 class="section-title">运输环节管理</h2>
+      </div>
+      <div class="section-desc">补齐七环 · 运输配送全程可溯</div>
+    </div>
+
+    <div class="kpi-row" id="transport-kpi">
+      <div class="kpi-card accent"><div class="kpi-label">运输批次</div><div class="kpi-val" id="tk-total">–</div></div>
+      <div class="kpi-card"><div class="kpi-label">已关联检疫证</div><div class="kpi-val" id="tk-linked">–</div></div>
+      <div class="kpi-card"><div class="kpi-label">在途</div><div class="kpi-val" id="tk-transit">–</div></div>
+      <div class="kpi-card"><div class="kpi-label">未关联检疫证</div><div class="kpi-val" id="tk-unlinked">–</div></div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div class="field"><label class="field-label" for="t-no">运输编号</label><input id="t-no" class="input" placeholder="YS2026-00001"></div>
+        <div class="field"><label class="field-label" for="t-date">运输日期</label><input id="t-date" class="input" type="date"></div>
+        <div class="field"><label class="field-label" for="t-from">起运地</label><input id="t-from" class="input" placeholder="XX省XX市XX县XX镇"></div>
+        <div class="field"><label class="field-label" for="t-to">目的地</label><input id="t-to" class="input" placeholder="XX省YY市YY区XX屠宰场"></div>
+        <div class="grid-2" style="gap:14px;">
+          <div class="field"><label class="field-label" for="t-kind">动物种类</label><input id="t-kind" class="input" placeholder="肉牛"></div>
+          <div class="field"><label class="field-label" for="t-qty">数量</label><input id="t-qty" class="input" type="number" placeholder="120"></div>
+        </div>
+        <div class="field"><label class="field-label" for="t-vehicle">运输车辆</label><input id="t-vehicle" class="input" placeholder="豫N·XXXXX（厢式恒温车）"></div>
+        <div class="field"><label class="field-label" for="t-driver">司机</label><input id="t-driver" class="input" placeholder="王XX（138****5678）"></div>
+        <div class="field"><label class="field-label" for="t-cert">随车检疫证号</label><input id="t-cert" class="input" placeholder="JC2026-DEMO01（关联键）"><div class="field-hint">填写对应《动物检疫合格证明》编号，业务追溯将自动拼链</div></div>
+        <div class="field"><label class="field-label" for="t-arrive">计划到达时间</label><input id="t-arrive" class="input" placeholder="2026-07-26 06:00"></div>
+        <div class="field"><label class="field-label" for="t-cond">运输条件</label><input id="t-cond" class="input" placeholder="温度5℃~18℃，通风良好"></div>
+        <div class="btn-row">
+          <button class="btn btn-primary" id="t-submit" onclick="submitTransport()"><span>登记并上链</span></button>
+          <button class="btn btn-ghost btn-sm" onclick="resetTransport()">重置</button>
+        </div>
+      </div>
+      <div>
+        <div class="result info" id="t-result" style="display:none;"></div>
+      </div>
+    </div>
+
+    <div class="transport-list-head">
+      <h3 class="block-sub">运输台账</h3>
+      <button class="btn btn-ghost btn-sm" onclick="loadTransport()">刷新</button>
+    </div>
+    <div class="transport-grid" id="transport-grid"></div>
+  </div>
+
+    <div class="section" id="sec-vcvp">
+    <style>
+      .issuer-box{border:1px solid #e2e8f0;border-radius:10px;padding:10px 12px;margin-top:10px;background:#f8fafc;font-size:12px;}
+      .issuer-line{line-height:1.7;}
+      .issuer-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#475569;word-break:break-all;}
+      .verify-result{border-radius:10px;padding:10px 12px;margin-top:10px;font-size:13px;font-weight:500;}
+      .verify-result.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;}
+      .verify-result.bad{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;}
+      .verify-detail{font-weight:400;font-size:12px;margin-top:4px;color:#475569;word-break:break-all;}
+      .btn-outline{background:#fff;border:1px solid #15803d;color:#15803d;}
+      .btn-outline:hover{background:#f0fdf4;}
+
+.field-hint.ok { color: #1a7f37; }
+.field-hint.err { color: #c0392b; }
+.input-err { border-color: #c0392b !important; box-shadow: 0 0 0 2px rgba(192,57,43,.15); }
+
+/* 签发者目录 (CA) */
+.ca-root { margin: 6px 0 16px; padding: 12px 16px; background: #fff; border: 1px solid #e3e8e3; border-radius: 14px; }
+.ca-root-line b { color: #15734d; }
+.ca-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.ca-card { background: #fff; border: 1px solid #e3e8e3; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.ca-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ca-card-name { font-weight: 600; color: #16241c; }
+.ca-line { font-size: .82rem; color: #51615a; line-height: 1.5; word-break: break-all; }
+.ca-revoked { color: #c0392b; }
+.ca-card-foot { margin-top: 8px; }
+.ca-note { margin-top: 14px; font-size: .8rem; color: #51615a; }
+.ca-badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .76rem; font-weight: 600; }
+.ca-badge.ok { background: rgba(26,127,55,.12); color: #1a7f37; }
+.ca-badge.bad { background: rgba(192,57,43,.12); color: #c0392b; }
+.ca-badge.warn { background: rgba(176,122,0,.14); color: #9a6b00; }
+.btn-xs { padding: 4px 10px; font-size: .76rem; }
+@media (max-width: 780px) { .ca-grid { grid-template-columns: 1fr; } }
+
+.trace-badge.warn{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.5);color:#a16207}
+.tc-party{margin-top:6px;font-size:12px;padding:3px 8px;border-radius:6px;display:inline-block}
+.tc-party.ok{background:rgba(34,197,94,.12);color:#15803d;border:1px solid rgba(34,197,94,.4)}
+.tc-party.warn{background:rgba(234,179,8,.12);color:#a16207;border:1px solid rgba(234,179,8,.5)}
+#party-trust{margin-top:6px}
+    </style>
+    <div class="section-head">
+      <div>
+        <span class="section-num">07 / VC·VP</span>
+        <h2 class="section-title">可验证凭证与隐私披露</h2>
+      </div>
+      <div class="section-desc">W3C VC/VP · P-256 Pedersen 承诺 · Schnorr 零知识证明</div>
+    </div>
+
+    <p style="color:var(--ink-2); font-size:var(--t-small); margin-bottom:16px; line-height:1.65;">
+      本系统依据 DID_test 参考实现的密码学构造：VC 将元数据按 <b>basic / ownership / content</b> 三模块组织，
+      计算三元组哈希 <code>x = SHA256(metadata &#8216; fingerprint &#8216; DID)</code>，生成 P-256 上的 Pedersen 承诺
+      <code>C = x&#183;G + r&#183;H</code>；VP 可携带承诺点 (Cx, Cy) 与可选 <b>Schnorr 零知识证明</b>，
+      实现「全披露」或「零知识选择性披露」。签发者仍由 CA 信任锚用 SM2 签名问责。
+    </p>
+
+    <div class="vc-grid">
+      <div class="vc-card">
+        <div class="vc-card-head">VC 凭证组件 · 上链状态</div>
+        <table class="vc-table">
+          <thead><tr><th style="width:40%">内容</th><th style="width:18%">存链上？</th><th>说明</th></tr></thead>
+          <tbody>
+            <tr><td>凭证模板 / Schema</td><td><span class="vc-badge yes">&#10003; 是</span></td><td><span class="vc-note">三模块元数据结构化存储</span></td></tr>
+            <tr><td>三元组哈希 x（SHA256）</td><td><span class="vc-badge yes">&#10003; 是</span></td><td><span class="vc-note">metadata &#8216; fingerprint &#8216; DID</span></td></tr>
+            <tr><td>Pedersen 承诺 C = x&#183;G+r&#183;H</td><td><span class="vc-badge yes">&#10003; 是</span></td><td><span class="vc-note">P-256 曲线，绑定数据权属</span></td></tr>
+            <tr><td>颁发者 DID + SM2 公钥</td><td><span class="vc-badge yes">&#10003; 是</span></td><td><span class="vc-note">CA 信任锚验证签名真实性</span></td></tr>
+            <tr><td>凭证状态（是否吊销）</td><td><span class="vc-badge yes">&#10003; 是</span></td><td><span class="vc-note">吊销链上实时生效</span></td></tr>
+            <tr><td>零知识证明 &#960;</td><td><span class="vc-badge partial">&#9888; 可选</span></td><td><span class="vc-note">开启后不泄露任何明文</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="vc-card">
+        <div class="vc-card-head">隐私披露方式 · 对比</div>
+        <table class="vc-table">
+          <thead><tr><th style="width:22%">披露方式</th><th style="width:30%">你能控制看什么</th><th style="width:28%">对方能验证什么</th><th style="width:20%">隐私程度</th></tr></thead>
+          <tbody>
+            <tr><td><b>全披露</b></td><td><span class="vc-badge no">&#10007; 全部暴露</span></td><td>所有信息 + 承诺可重算</td><td><div class="vc-privacy-bar"><span class="vc-privacy-dot low"></span></div>低</td></tr>
+            <tr><td><b>模块化披露</b></td><td><span class="vc-badge yes">&#10003; 选择纳入承诺的模块</span></td><td>仅验证所选模块完整性</td><td><div class="vc-privacy-bar"><span class="vc-privacy-dot mid"></span></div>中</td></tr>
+            <tr><td><b>零知识证明</b></td><td><span class="vc-badge yes">&#10003; 只披露"条件成立"</span></td><td>仅确认承诺有效，看不到任何数据</td><td><div class="vc-privacy-bar"><span class="vc-privacy-dot high"></span></div>高</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="margin-top:18px; display:flex; flex-wrap:wrap; gap:8px;">
+      <span class="vc-tag">W3C VC / VP</span>
+      <span class="vc-tag">Pedersen Commitment (P-256)</span>
+      <span class="vc-tag">Schnorr ZKP</span>
+      <span class="vc-tag">Modular Disclosure</span>
+      <span class="vc-tag">SM2 Issuer Proof</span>
+      <span class="vc-tag">DID:ChainMaker</span>
+    </div>
+
+    <!-- 实际构造演示 -->
+    <div class="vc-demo-head">实际构造演示（对齐 DID_test 参考实现）</div>
+    <div class="vc-demo-grid">
+
+      <!-- VC 构造 -->
+      <div class="vc-demo-card">
+        <h3><span class="badge-num">1</span> 构造 VC（数据权属凭证）</h3>
+        <div class="field">
+          <label class="field-label" for="vc-dataid">数据 ID / 检疫编号</label>
+          <input class="input" id="vc-dataid" value="JC2026-00158">
+        </div>
+        <div class="field">
+          <label class="field-label" for="vc-holder">持证人 DID（holder）</label>
+          <input class="input" id="vc-holder" value="did:chainmaker:holder:8aF3c2">
+        </div>
+        <div class="field">
+          <label class="field-label" for="vc-issuer-select">颁发者（信任锚内签发者）</label>
+          <select class="select" id="vc-issuer-select" onchange="onIssuerSelect()">
+            <option value="">加载中…</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="vc-sample-type">示例类型（自动填充声明）</label>
+          <select class="select" id="vc-sample-type" onchange="onVCSampleChange()">
+            <option value="quarantine" selected>检疫凭证</option>
+            <option value="transaction">交易凭证</option>
+            <option value="transport">运输凭证</option>
+            <option value="slaughter">屠宰凭证</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="vc-claims">声明字段（每行 键: 值，归入对应模块）</label>
+          <textarea class="textarea" id="vc-claims" style="min-height:110px;">animalType: 肉牛
+batchNo: JC2026-00158
+quarantineResult: 合格
+farmName: XX生态养殖场
+inspector: 张XX</textarea>
+        </div>
+        <div class="field">
+          <label class="field-label">纳入承诺的模块（模块化选择性披露）</label>
+          <div class="claim-check" id="vc-modules">
+            <label><input type="checkbox" data-mod="basic" checked> basic（基础信息）</label>
+            <label><input type="checkbox" data-mod="ownership" checked> ownership（权属）</label>
+            <label><input type="checkbox" data-mod="content" checked> content（内容）</label>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">披露模式</label>
+          <div class="claim-check">
+            <label><input type="radio" name="vc-mode" value="full" checked> 全披露（携带明文 + 盲因子 r）</label>
+            <label><input type="radio" name="vc-mode" value="zk"> 零知识证明（仅承诺 + ZK &#960;）</label>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="vc-build-btn" onclick="buildVC()">生成 VC</button>
+          <button class="btn btn-ghost btn-sm" onclick="resetVCForm()">重置</button>
+          <button class="btn btn-outline btn-sm" onclick="verifyVC()">验证 VC</button>
+        </div>
+        <div class="code-box" id="vc-output" style="display:none;"></div>
+        <div class="issuer-box" id="vc-issuer-box" style="display:none;"></div>
+        <div class="verify-result" id="vc-verify-output" style="display:none;"></div>
+      </div>
+
+      <!-- VP 构造 -->
+      <div class="vc-demo-card">
+        <h3><span class="badge-num">2</span> 构造 VP（可验证表达）</h3>
+        <div class="vc-hint" style="margin-bottom:8px;">VP 包裹已签发的 VC。零知识模式下不携带任何明文，验证方仅能确认承诺有效。</div>
+        <div class="field">
+          <label class="field-label" for="vp-challenge">验证方挑战值 Challenge</label>
+          <input class="input" id="vp-challenge" value="nonce-7d3e9f-2026" placeholder="防止重放的随机值">
+        </div>
+        <div class="field">
+          <label class="field-label" for="vp-domain">验证方域名 Domain</label>
+          <input class="input" id="vp-domain" value="inspector.gov.cn" placeholder="凭证使用场景域名">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" id="vp-build-btn" onclick="buildVP()">生成 VP</button>
+          <button class="btn btn-outline btn-sm" onclick="verifyVP()">验证 VP</button>
+        </div>
+        <div class="code-box" id="vp-output" style="display:none;"></div>
+        <div class="verify-result" id="vp-verify-output" style="display:none;"></div>
+      </div>
+
+    </div>
+  </div>
+
+
+  <!-- Section: 签发者目录 (CA) -->
+  <div class="section" id="sec-ca">
+    <div class="section-head">
+      <div>
+        <span class="section-num">08 / 签发者目录</span>
+        <h2 class="section-title">签发者可信体系（CA）</h2>
+      </div>
+      <div class="section-desc">根 CA → 签发者证书 · 绑定 DID / 统一社会信用代码 / 公钥 · 含有效期与吊销</div>
+    </div>
+    <div class="ca-root" id="ca-root"></div>
+    <div class="ca-grid" id="ca-grid"></div>
+    <p class="ca-note">演示：吊销某签发者后，回到「VC·VP」重新验证其签发的 VC/VP，将显示「签发者证书已被吊销」。吊销可逆，可随时「恢复」。</p>
+  </div>
 
 <div id="toast" class="toast" style="display:none;"></div>
 
@@ -663,6 +1314,7 @@ if(txt)txt.textContent="JS OK";if(dot)dot.className="status-dot ok";
 }catch(e){console.error(e)}})();
 let currentDataDID = null;
 let wmOriginalImage = null;
+let wmWatermarkedImage = null;
 
 // 默认模式信息
 // onWmModeChange() called on demand
@@ -679,6 +1331,51 @@ async function fetchCsrfToken() {
 
 function getApiKey() { return document.getElementById('api-key-input').value.trim(); }
 
+let _apiKeyCheckTimer = null;
+function onApiKeyInput() {
+  const el = document.getElementById('api-key-input');
+  const status = document.getElementById('auth-status');
+  const key = el.value.trim();
+  // 防抖：停止输入 400ms 后再请求，避免每次按键都打后端
+  if (_apiKeyCheckTimer) clearTimeout(_apiKeyCheckTimer);
+  if (!key) {
+    status.className = 'auth-status bad';
+    status.textContent = '✗ 请输入 Key';
+    el.classList.add('bad');
+    return;
+  }
+  status.className = 'auth-status checking';
+  status.textContent = '… 校验中';
+  _apiKeyCheckTimer = setTimeout(checkApiKey, 400);
+}
+
+async function checkApiKey() {
+  const el = document.getElementById('api-key-input');
+  const status = document.getElementById('auth-status');
+  const key = el.value.trim();
+  if (!key) {
+    status.className = 'auth-status bad';
+    status.textContent = '✗ 请输入 Key';
+    el.classList.add('bad');
+    return;
+  }
+  try {
+    const r = await fetch('/api/check-key', { headers: { 'X-API-Key': key } });
+    if (r.status === 200) {
+      status.className = 'auth-status ok';
+      status.textContent = '● 已认证';
+      el.classList.remove('bad');
+    } else {
+      status.className = 'auth-status bad';
+      status.textContent = '✗ 无效 Key';
+      el.classList.add('bad');
+    }
+  } catch (e) {
+    status.className = 'auth-status checking';
+    status.textContent = '… 无法连接';
+  }
+}
+
 async function securePost(url, body) {
   const headers = { 'Content-Type': 'application/json', 'X-API-Key': getApiKey(), 'X-CSRF-Token': csrfToken };
   const r = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
@@ -694,6 +1391,7 @@ async function init() {
 
   // Step 2: 每个操作独立 try/catch,一个失败不影响其他
   try { await fetchCsrfToken(); } catch (e) { console.error('CSRF:', e); }
+  try { checkApiKey(); } catch (e) { console.error('APIKey:', e); }
   try {
     const r = await fetch('/api/owner_info');
     const info = await r.json();
@@ -701,7 +1399,353 @@ async function init() {
     if (wmText && info.owner_did) wmText.value = info.owner_did;
   } catch (e) { console.error('Owner:', e); }
   try { loadRecords(); } catch (e) { console.error('Records:', e); }
+  try { refreshKPIs(); } catch (e) { console.error('KPI:', e); }
   try { checkChain(); } catch (e) { console.error('Chain:', e); }
+  try { initShareFromUrl(); } catch (e) { console.error('Share:', e); }
+  try { initSidebarNav(); } catch (e) { console.error('Sidebar:', e); }
+  try { loadParties(); } catch (e) { console.error('Parties:', e); } console.error('Sidebar:', e);
+  try { loadIssuers(); } catch (e) { console.error('Issuers:', e); }
+  try { renderCADirectory(); } catch (e) { console.error('CADir:', e); }
+}
+
+/* ─── Sidebar navigation ─── */
+function initSidebarNav() {
+  const navItems = document.querySelectorAll('.nav-item');
+  navItems.forEach(item => {
+    item.addEventListener('click', function(e) {
+      e.preventDefault();
+      const targetId = this.getAttribute('data-target');
+      const el = document.getElementById(targetId);
+      if (el) {
+        const offset = 80; // topbar + padding
+        const top = el.getBoundingClientRect().top + window.scrollY - offset;
+        window.scrollTo({ top, behavior: 'smooth' });
+      }
+      // mobile: close nav if needed
+    });
+  });
+
+  // IntersectionObserver: highlight active nav item on scroll
+  const sections = document.querySelectorAll('.section[id]');
+  const kpiRow = document.getElementById('kpi-row');
+  const observerOpts = { rootMargin: '-60px 0px -40% 0px', threshold: 0 };
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navItems.forEach(n => n.classList.remove('active'));
+        const id = entry.target.id;
+        const active = document.querySelector('.nav-item[data-target="' + id + '"]');
+        if (active) active.classList.add('active');
+        // dashboard targets KPI row
+        if (!active && kpiRow && entry.target === kpiRow) {
+          const dash = document.querySelector('.nav-item[data-target="kpi-row"]');
+          if (dash) dash.classList.add('active');
+        }
+      }
+    });
+  }, observerOpts);
+  sections.forEach(s => observer.observe(s));
+  // also observe area around KPI for "dashboard" active state
+  if (kpiRow) observer.observe(kpiRow);
+}
+
+// 侧边栏收起/展开切换
+function toggleSidebar() {
+  document.body.classList.toggle('sidebar-collapsed');
+}
+
+/* ─── VC·VP construction demo ─── */
+let currentVC = null;
+let currentVP = null;
+let currentClaims = [];
+
+// 预设凭证类型 → 英文类型名（声明字段直接复用 SAMPLE_DATA 文本）
+const VC_TYPE_MAP = {
+  quarantine:  'QuarantineCertificate',
+  transaction: 'TransactionCertificate',
+  transport:   'TransportCertificate',
+  slaughter:   'SlaughterCertificate'
+};
+
+// 切换示例凭证类型：自动填充凭证类型英文名 + 对应声明字段
+function onVCSampleChange() {
+  const key = document.getElementById('vc-sample-type').value;
+  const presets = {
+    quarantine: { did: 'JC2026-00158', claims: 'animalType: 肉牛\nbatchNo: JC2026-00158\nquarantineResult: 合格\nfarmName: XX生态养殖场\ninspector: 张XX' },
+    transaction: { did: 'JC2026-T-0099', claims: 'buyer: 生鲜超市A\nprice: 12800\nseller: XX生态养殖场\ntransferDate: 2026-03-12' },
+    transport: { did: 'JC2026-TR-0042', claims: 'vehicle: 沪A·6688\nfrom: XX生态养殖场\nto: 屠宰场B\ntransportDate: 2026-03-13' },
+    slaughter: { did: 'JC2026-SL-0077', claims: 'slaughterHouse: 屠宰场B\ncarcassNo: SJ2026-0077\nslaughterDate: 2026-03-14\nweight: 420kg' },
+  };
+  const p = presets[key] || presets.quarantine;
+  document.getElementById('vc-dataid').value = p.did;
+  document.getElementById('vc-claims').value = p.claims;
+}
+
+const dataTypeMap = { quarantine: '检疫数据', transaction: '交易数据', transport: '运输数据', slaughter: '屠宰数据' };
+
+async function buildVC() {
+  const holder = (document.getElementById('vc-holder').value || '').trim();
+  const dataId = (document.getElementById('vc-dataid').value || '').trim();
+  const sampleKey = document.getElementById('vc-sample-type').value;
+  const dataType = dataTypeMap[sampleKey] || '通用数据';
+  const claimsRaw = document.getElementById('vc-claims').value || '';
+  const claimMap = {};
+  claimsRaw.split('\n').forEach(function (line) {
+    const i = line.indexOf(':');
+    if (i > 0) { const k = line.slice(0, i).trim(); const v = line.slice(i + 1).trim(); if (k) claimMap[k] = v; }
+  });
+  let fingerprint = '';
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(claimsRaw));
+    fingerprint = Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  } catch (e) { fingerprint = 'fp-' + Math.random().toString(16).slice(2, 18); }
+
+  const metadata = {
+    basic: { data_id: dataId, data_type: dataType, data_name: claimMap.farmName || claimMap.name || claimMap.seller || dataId, version: '1.0' },
+    ownership: { owner: claimMap.farmName || claimMap.seller || claimMap.buyer || holder, org_id: claimMap.org_id || '', did: holder, license: 'proprietary' },
+    content: { fingerprint: fingerprint, file_size: 0, file_type: dataType, description: claimMap.description || '', tags: [] },
+  };
+  Object.keys(claimMap).forEach(function (k) {
+    if (!(k in metadata.basic) && !(k in metadata.ownership)) metadata.content[k] = claimMap[k];
+  });
+
+  const modules = [];
+  document.querySelectorAll('#vc-modules input[type=checkbox]').forEach(function (b) { if (b.checked) modules.push(b.getAttribute('data-mod')); });
+  if (modules.length === 0) { showToast('请至少选择一个模块', 'err'); return; }
+  const mode = (document.querySelector('input[name=vc-mode]:checked') || {}).value || 'full';
+  const use_zk = (mode === 'zk');
+
+  const sel = document.getElementById('vc-issuer-select');
+  const issuerDid = sel ? sel.value : '';
+  const issuerName = sel ? (sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.name || '' : '') : '';
+
+  const btn = document.getElementById('vc-build-btn');
+  btn.disabled = true; btn.textContent = '签发中…';
+  try {
+    const r = await securePost('/api/vc/request', {
+      metadata: metadata, holder_did: holder,
+      issuer_did: issuerDid, issuer_name: issuerName,
+      modules: modules, use_zk: use_zk,
+    });
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
+    const vc = await r.json();
+    currentVC = vc;
+    const box = document.getElementById('vc-output');
+    box.style.display = 'block'; box.innerHTML = syntaxHL(vc);
+    await renderIssuerInfo();
+    document.getElementById('vp-output').style.display = 'none';
+    document.getElementById('vp-verify-output').style.display = 'none';
+    showToast('VC 已生成（P-256 Pedersen 承诺' + (use_zk ? ' + Schnorr ZKP 零知识' : ' + 明文盲因子') + '，SM2 签发者签名）', 'ok');
+  } catch (e) {
+    showToast('VC 签发失败：' + (e.message || e), 'err');
+  } finally { btn.disabled = false; btn.textContent = '生成 VC'; }
+}
+
+async function buildVP() {
+  if (!currentVC) { showToast('请先生成 VC', 'err'); return; }
+  const challenge = (document.getElementById('vp-challenge').value || '').trim() || ('nonce-' + Math.random().toString(16).slice(2, 10));
+  const domain = (document.getElementById('vp-domain').value || '').trim() || 'inspector.gov.cn';
+  const btn = document.getElementById('vp-build-btn');
+  btn.disabled = true; btn.textContent = '构造中…';
+  try {
+    const r = await securePost('/api/vp/construct', { vc: currentVC, challenge: challenge, domain: domain });
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
+    const vp = await r.json();
+    currentVP = vp;
+    const box = document.getElementById('vp-output');
+    box.style.display = 'block'; box.innerHTML = syntaxHL(vp);
+    const disc = (vp.disclosure === 'zk_only') ? '零知识（不泄露明文）' : '全披露';
+    showToast('VP 已构造（披露模式：' + disc + '）', 'ok');
+  } catch (e) {
+    showToast('VP 构造失败：' + (e.message || e), 'err');
+  } finally { btn.disabled = false; btn.textContent = '生成 VP'; }
+}
+
+function resetVCForm() {
+  document.getElementById('vc-sample-type').value = 'quarantine';
+  document.getElementById('vc-holder').value = 'did:chainmaker:holder:8aF3c2';
+  onVCSampleChange();
+  document.getElementById('vc-output').style.display = 'none';
+  document.getElementById('vc-issuer-box').style.display = 'none';
+  document.getElementById('vc-verify-output').style.display = 'none';
+  document.getElementById('vp-output').style.display = 'none';
+  document.getElementById('vp-verify-output').style.display = 'none';
+  currentVC = null; currentVP = null;
+}
+
+async function renderIssuerInfo() {
+  const el = document.getElementById('vc-issuer-box');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/issuer_info');
+    const info = await r.json();
+    const _st = info.cert_status === 'valid'
+      ? '<span class="ca-badge ok">✓ 证书有效</span>'
+      : '<span class="ca-badge bad">✗ 证书' + (info.cert_status === 'revoked' ? '已吊销' : '异常') + '</span>';
+    el.style.display = 'block';
+    el.innerHTML = '<div class="issuer-line"><b>默认签发者</b>：' + esc(info.issuer_name || '') + ' ' + _st + '</div>' +
+      '<div class="issuer-line issuer-mono">DID：' + esc(info.issuer_did || '') + '</div>' +
+      '<div class="issuer-line issuer-mono">证书序列号：' + esc(info.cert_serial || '') + '</div>' +
+      '<div class="issuer-line issuer-mono">根 CA：' + esc(info.root_name || '') + '</div>';
+    await loadIssuers();
+  } catch (e) { el.style.display = 'none'; }
+}
+
+async function loadIssuers() {
+  const sel = document.getElementById('vc-issuer-select');
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/issuers');
+    const dir = await r.json();
+    const list = dir.issuers || [];
+    const cur = sel.value;
+    sel.innerHTML = list.map(it => '<option value="' + esc(it.did) + '" data-name="' + esc(it.name) + '">' + esc(it.name) + (it.status === 'revoked' ? '（已吊销）' : '') + '</option>').join('');
+    if (cur) sel.value = cur;
+  } catch (e) { /* ignore */ }
+}
+
+function onIssuerSelect() { /* 当前签发者即所选，留作扩展 */ }
+
+async function verifyVC() {
+  if (!currentVC) { showToast('请先生成 VC', 'err'); return; }
+  try {
+    const r = await securePost('/api/vc/verify', { vc: currentVC });
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
+    const res = await r.json();
+    const parts = [];
+    parts.push(issuerBadge(res.issuer_status, res.issuer_trusted));
+    parts.push('签发者：' + (res.issuer_name || res.issuer || ''));
+    parts.push('权属人：' + (res.owner_name || res.owner || ''));
+    parts.push('承诺校验：' + (res.commitment_valid ? '通过' : '失败'));
+    parts.push('模式：' + (res.mode === 'zk_only' ? '零知识' : '全披露'));
+    if (res.errors && res.errors.length) parts.push('错误：' + res.errors.join('；'));
+    showVerifyResult('vc-verify-output', res.valid, parts.join('　'));
+  } catch (e) { showToast('VC 验证失败：' + (e.message || e), 'err'); }
+}
+
+async function verifyVP() {
+  if (!currentVP) { showToast('请先生成 VP', 'err'); return; }
+  try {
+    const r = await securePost('/api/vp/verify', { vp: currentVP });
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
+    const res = await r.json();
+    const parts = [];
+    parts.push('权属验证：' + (res.valid ? '通过' : '失败'));
+    if (res.mode) parts.push('模式：' + (res.mode === 'zk_only' ? '零知识' : '全披露'));
+    if (res.did) parts.push('持有者：' + res.did);
+    if (res.modules && res.modules.length) parts.push('披露模块：' + res.modules.join('/'));
+    if (res.issuer_status) parts.push(issuerBadge(res.issuer_status, res.issuer_trusted));
+    if (res.errors && res.errors.length) parts.push('错误：' + res.errors.join('；'));
+    showVerifyResult('vp-verify-output', res.valid, parts.join('　'));
+  } catch (e) { showToast('VP 验证失败：' + (e.message || e), 'err'); }
+}
+
+function issuerBadge(status, trusted) {
+  if (status === 'valid' && trusted) return '<span class="ca-badge ok">✓ 签发者可信（证书有效）</span>';
+  if (status === 'revoked') return '<span class="ca-badge bad">✗ 签发者证书已吊销</span>';
+  if (status === 'expired') return '<span class="ca-badge warn">⚠ 签发者证书已过期</span>';
+  if (status === 'tampered') return '<span class="ca-badge bad">✗ 公钥不符（疑似伪造）</span>';
+  if (status === 'unknown') return '<span class="ca-badge bad">✗ 未知签发者（不在信任锚）</span>';
+  return '<span class="ca-badge bad">✗ 签发者不可信</span>';
+}
+
+async function renderCADirectory() {
+  const grid = document.getElementById('ca-grid');
+  const rootEl = document.getElementById('ca-root');
+  if (!grid) return;
+  try {
+    const r = await fetch('/api/issuers');
+    const dir = await r.json();
+    const root = dir.root || {};
+    if (rootEl) rootEl.innerHTML = '<div class="ca-root-line"><b>根 CA</b>：' + esc(root.name || '') + '　<span class="issuer-mono">' + esc(root.did || '') + '</span></div>';
+    grid.innerHTML = (dir.issuers || []).map(it => {
+      const st = it.status === 'valid' ? '<span class="ca-badge ok">✓ 有效</span>' : '<span class="ca-badge bad">✗ 已吊销</span>';
+      const act = it.status === 'valid'
+        ? '<button class="btn btn-ghost btn-xs" onclick="revokeIssuer(\'' + esc(it.did) + '\')">吊销</button>'
+        : '<button class="btn btn-outline btn-xs" onclick="restoreIssuer(\'' + esc(it.did) + '\')">恢复</button>';
+      return '<div class="ca-card">' +
+        '<div class="ca-card-head"><span class="ca-card-name">' + esc(it.name) + '</span>' + st + '</div>' +
+        '<div class="ca-line issuer-mono">DID：' + esc(it.did) + '</div>' +
+        '<div class="ca-line">统一社会信用代码：' + esc(it.unified_social_credit_code || '') + '</div>' +
+        '<div class="ca-line">区域：' + esc(it.region || '') + '　职责：' + esc(it.role || '') + '</div>' +
+        '<div class="ca-line issuer-mono">证书序列号：' + esc(it.serial) + '</div>' +
+        '<div class="ca-line">有效期：' + esc((it.not_before || '').slice(0, 10)) + ' ~ ' + esc((it.not_after || '').slice(0, 10)) + '</div>' +
+        (it.status === 'revoked' ? '<div class="ca-line ca-revoked">吊销原因：' + esc(it.revoke_reason || '') + '</div>' : '') +
+        '<div class="ca-card-foot">' + act + '</div>' +
+        '</div>';
+    }).join('');
+  } catch (e) { grid.innerHTML = '<div class="transport-empty">签发者目录加载失败</div>'; }
+}
+
+async function revokeIssuer(did) {
+  if (!confirm('确认吊销该签发者证书？吊销后其签发的 VC/VP 将验证失败。')) return;
+  try {
+    const key = getApiKey();
+    const tok = await (await fetch('/api/csrf-token')).json();
+    const r = await fetch('/api/issuers/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': key, 'X-CSRF-Token': tok.csrf_token }, body: JSON.stringify({ did: did, reason: '管理员演示吊销' }) });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+    showToast('已吊销：' + did, 'ok');
+    renderCADirectory();
+  } catch (e) { showToast('吊销失败：' + (e.message || e), 'err'); }
+}
+
+async function restoreIssuer(did) {
+  try {
+    const key = getApiKey();
+    const tok = await (await fetch('/api/csrf-token')).json();
+    const r = await fetch('/api/issuers/restore', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': key, 'X-CSRF-Token': tok.csrf_token }, body: JSON.stringify({ did: did }) });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+    showToast('已恢复：' + did, 'ok');
+    renderCADirectory();
+  } catch (e) { showToast('恢复失败：' + (e.message || e), 'err'); }
+}
+
+function showVerifyResult(id, ok, detail) {
+  const el = document.getElementById(id);
+  el.style.display = 'block';
+  el.className = 'verify-result ' + (ok ? 'ok' : 'bad');
+  el.innerHTML = (ok ? '✓ 验证通过' : '✗ 验证未通过') + '<div class="verify-detail">' + detail + '</div>';
+}
+
+async function refreshKPIs() {
+  const setT = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  let data = null;
+  try {
+    const key = getApiKey() || '';
+    const r = await fetch('/api/records?page=1&per_page=10000', { headers: { 'X-API-Key': key } });
+    data = await r.json();
+  } catch(e) {
+    console.error('[KPI] fetch error:', e);
+  }
+  // API returns {records:[...], total:N, ...} when paginated, or bare array when not
+  let records = null;
+  if (Array.isArray(data)) {
+    records = data;
+  } else if (data && Array.isArray(data.records)) {
+    records = data.records;
+  }
+  if (!records || !records.length) {
+    console.warn('[KPI] no records:', typeof data, data ? Object.keys(data).slice(0,5) : 'null');
+    return;
+  }
+  // Use server-provided total if available, otherwise count records array
+  const total = (typeof data.total === 'number') ? data.total : records.length;
+  let onchain = 0, maxH = 0, latest = '';
+  records.forEach(x => {
+    if (x.chain_tx_id && x.chain_tx_id !== '本地') onchain++;
+    const h = Number(x.block_height) || 0; if (h > maxH) maxH = h;
+    if (x.timestamp && (!latest || x.timestamp > latest)) latest = x.timestamp;
+  });
+  setT('kpi-total', total);
+  setT('kpi-onchain', onchain);
+  setT('kpi-height', maxH || '–');
+  if (latest) {
+    const s = latest.replace('T', ' ').replace(/\+.*$/, '').replace(/\.\d+$/, '');
+    setT('kpi-latest', s.length > 16 ? s.substring(0, 16) : s);
+  }
+  console.log('[KPI] updated: total=' + total + ' onchain=' + onchain + ' height=' + maxH);
 }
 
 function setChainStatusDefault() {
@@ -737,6 +1781,121 @@ function setBusy(btn, busy, label) {
   btn.innerHTML = busy ? '<span class="spinner"></span> ' + label : label;
 }
 
+// ===== 主数据：关联主体 + 证号校验 =====
+let partyCache = null;
+
+async function loadParties() {
+  try {
+    const r = await fetch('/api/parties');
+    const d = await r.json();
+    partyCache = d.parties || [];
+    const sel = document.getElementById('party-select');
+    if (!sel) return;
+    const groups = { farm: '养殖场', slaughter: '屠宰场', vet: '官方兽医', unknown: '历史未登记' };
+    let html = '<option value="">— 选择养殖场 / 屠宰场 / 官方兽医 —</option>';
+    Object.keys(groups).forEach(function (role) {
+      const items = partyCache.filter(function (p) { return p.role === role; });
+      if (!items.length) return;
+      html += '<optgroup label="' + groups[role] + '">';
+      items.forEach(function (p) {
+        const sub = p.credit_code ? ('（' + p.credit_code + '）') : (p.license ? ('（' + p.license + '）') : '');
+        const did = p.did ? (' data-did="' + esc(p.did) + '"') : ' data-did=""';
+        const code = p.credit_code ? (' data-code="' + esc(p.credit_code) + '"') : ' data-code=""';
+        const lic = p.license ? (' data-license="' + esc(p.license) + '"') : ' data-license=""';
+        const reg = (p.did && !p.history) ? '1' : '0';
+        html += '<option value="' + esc(p.name) + '"' + did + code + lic + ' data-role="' + role + '" data-registered="' + reg + '">' + esc(p.name) + sub + '</option>';
+      });
+      html += '</optgroup>';
+    });
+    sel.innerHTML = html;
+  } catch (e) { console.error('loadParties:', e); }
+}
+
+function onPartySelect() {
+  const sel = document.getElementById('party-select');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) return;
+  const type = document.getElementById('data-type').value;
+  const name = opt.value;
+  const code = opt.getAttribute('data-code') || '';
+  const lic = opt.getAttribute('data-license') || '';
+  if (type === 'quarantine') {
+    injectField('养殖场名称', name);
+    if (code) injectField('养殖场代码', code);
+  } else if (type === 'transaction') {
+    injectField('卖方', code ? (name + '（统一社会信用代码: ' + code + '）') : name);
+  } else if (type === 'slaughter') {
+    injectField('屠宰场', lic ? (name + '（定点屠宰许可证: ' + lic + '）') : name);
+    injectField('来源养殖场', name);
+  } else if (type === 'transport') {
+    const role = opt.getAttribute('data-role');
+    if (role === 'slaughter') injectField('目的地', name);
+    else if (role === 'farm') injectField('起运地', name);
+    else injectField('目的地', name);
+  }
+  applyCertToRaw();
+  checkPartyTrust(name, code);
+}
+
+async function checkPartyTrust(name, code) {
+  const box = document.getElementById('party-trust');
+  if (!box) return;
+  if (!name && !code) { box.textContent = ''; box.className = 'field-hint'; return; }
+  try {
+    const url = '/api/party/lookup?' + (code ? ('code=' + encodeURIComponent(code)) : ('name=' + encodeURIComponent(name)));
+    const r = await fetch(url);
+    const d = await r.json();
+    const short = (d.party && d.party.did) ? String(d.party.did).split(':').pop() : '';
+    if (d.found && d.registered) {
+      let msg = '✓ 已在信任主数据登记 · DID: ' + short + ' · 双向绑定生效';
+      if (d.ca_linked) msg += ' · CA可信签发者';
+      msg += '　（该主体名下 ' + (d.records_count || 0) + ' 条存证）';
+      box.textContent = msg; box.className = 'field-hint ok';
+      if (d.party && d.party.did) injectField('主体DID', d.party.did);
+    } else {
+      box.textContent = '⚠ 未登记主体预警：本次存证有效，但该主体尚未纳入信任主数据，可信度待核实（仍可提交）';
+      box.className = 'field-hint err';
+    }
+  } catch (e) { box.textContent = ''; }
+}
+
+function injectField(key, value) {
+  const el = document.getElementById('raw-data');
+  if (!el) return;
+  const re = new RegExp('^' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\s*[:：]\s*.*$', 'm');
+  const line = key + ': ' + value;
+  if (re.test(el.value)) el.value = el.value.replace(re, line);
+  else el.value = el.value + '\n' + line;
+}
+
+function onCertInput() {
+  const el = document.getElementById('cert-no');
+  const hint = document.getElementById('cert-hint');
+  const v = el.value.trim();
+  if (!v) { el.classList.remove('input-err'); hint.textContent = '格式：JC + 年份(4位) + - + 编号；将被写入存证并参与业务追溯关联'; hint.className = 'field-hint'; return; }
+  if (/^JC\d{4}-[A-Z0-9]+$/.test(v)) {
+    el.classList.remove('input-err'); hint.textContent = '✓ 证号格式正确'; hint.className = 'field-hint ok';
+  } else {
+    el.classList.add('input-err'); hint.textContent = '格式应为 JC + 年份(4位) + - + 编号，如 JC2026-00158（保留输入，可在提交前修正）'; hint.className = 'field-hint err';
+  }
+  applyCertToRaw();
+}
+
+function applyCertToRaw() {
+  const v = document.getElementById('cert-no').value.trim();
+  if (!v) return;
+  const type = document.getElementById('data-type').value;
+  const map = { quarantine: '检疫编号', transport: '随车检疫证号', slaughter: '来源检疫证号' };
+  if (map[type]) {
+    injectField(map[type], v);
+  } else if (type === 'transaction') {
+    let text = document.getElementById('raw-data').value;
+    if (/附检疫合格证明/.test(text)) text = text.replace(/附检疫合格证明[^\n]*/, '附检疫合格证明 ' + v);
+    else text += '\n备注: 附检疫合格证明 ' + v;
+    document.getElementById('raw-data').value = text;
+  }
+}
+
 async function submitData() {
   const btn = document.getElementById('btn-submit');
   const rawData = document.getElementById('raw-data').value.trim();
@@ -753,7 +1912,9 @@ async function submitData() {
     currentDataDID = result.step4_onchain.data_did;
     const chainOk = result.step5_chainmaker.success;
     renderSubmitResult(result, chainOk);
+    allRecordsForDropdown = null; // 刷新缓存，让新记录出现在下拉框
     loadRecords();
+    refreshKPIs();
     showToast(chainOk ? '上链成功' : '本地保存成功，链上失败', chainOk ? 'ok' : 'err');
   } catch (e) {
     if (!/^(401|403|429)/.test(e.message)) showToast('提交失败: ' + e.message, 'err');
@@ -862,20 +2023,46 @@ async function loadRecords(page) {
     }
     tbody.innerHTML = records.map(rec => {
       const did = rec.data_did;
-      return '<tr>' +
+      const checked = selectedDids.has(did) ? 'checked' : '';
+      const selClass = selectedDids.has(did) ? ' class="selected"' : '';
+      return '<tr' + selClass + '>' +
+        '<td class="col-check"><input type="checkbox" class="rec-check" data-did="' + did + '" ' + checked + ' onchange="onRowCheck(this)"></td>' +
         '<td title="' + did + '">' + (did || '').substring(0, 22) + '…</td>' +
         '<td style="font-family:inherit;">' + rec.data_type + '</td>' +
         '<td><span class="pill ok">' + rec.algorithm + '</span></td>' +
         '<td title="' + rec.fingerprint + '">' + (rec.fingerprint || '').substring(0, 18) + '…</td>' +
         '<td title="' + rec.commitment + '">' + (rec.commitment || '').substring(0, 18) + '…</td>' +
         '<td>' + (rec.chain_tx_id ? '<span class="pill ok">' + (rec.chain_tx_id || '').substring(0, 14) + '…</span>' : '<span class="pill muted">本地</span>') + '</td>' +
-        '<td class="num">' + (rec.timestamp || '').substring(0, 16) + '</td>' +
-        '<td style="font-family:inherit;"><button class="btn btn-ghost btn-sm" onclick="selectRecord(\'' + did + '\')">选择</button> <button class="btn btn-ghost btn-sm" onclick="revealNonce(\'' + did + '\')">揭示</button></td>' +
+        '<td class="num">' + (rec.timestamp || '').substring(0, 16).replace('T', ' ') + '</td>' +
+        '<td style="font-family:inherit;"><button class="btn btn-ghost btn-sm" onclick="selectRecord(\'' + did + '\')">据此验证</button> <button class="btn btn-ghost btn-sm" onclick="revealNonce(\'' + did + '\')">揭示</button></td>' +
         '</tr>';
     }).join('');
     select.innerHTML = '<option value="">— 选择记录 —</option>' + records.map(rec => '<option value="' + rec.data_did + '">' + (rec.data_did || '').substring(0, 22) + '…</option>').join('');
+    // 下拉框补充全部记录（不仅当前页）
+    if (allRecordsForDropdown && allRecordsForDropdown.length > records.length) {
+      const existing = new Set(records.map(r => r.data_did));
+      const extra = allRecordsForDropdown.filter(r => !existing.has(r.data_did));
+      if (extra.length > 0) {
+        select.innerHTML = '<option value="">— 选择记录 (' + allRecordsForDropdown.length + '条) —</option>'
+          + allRecordsForDropdown.map(rec => '<option value="' + rec.data_did + '">[' + rec.data_type + '] ' + (rec.data_did || '').substring(0, 22) + '…</option>').join('');
+      }
+    }
+    // 首次加载或缓存为空时，异步拉取全部记录填充下拉框
+    if (!allRecordsForDropdown) {
+      fetch('/api/records').then(function(r) { return r.json(); }).then(function(all) {
+        allRecordsForDropdown = Array.isArray(all) ? all : [];
+        if (allRecordsForDropdown.length > records.length) {
+          const existing = new Set(records.map(function(r) { return r.data_did; }));
+          select.innerHTML = '<option value="">— 选择记录 (' + allRecordsForDropdown.length + '条) —</option>'
+            + allRecordsForDropdown.map(function(rec) { return '<option value="' + rec.data_did + '">[' + rec.data_type + '] ' + (rec.data_did || '').substring(0, 22) + '…</option>'; }).join('');
+          // 保持之前选中的值
+          if (currentDataDID) select.value = currentDataDID;
+        }
+      }).catch(function() {});
+    }
     if (records.length > 0 && !currentDataDID) { currentDataDID = records[0].data_did; select.value = currentDataDID; }
     renderPagination();
+    updateBatchBar();
   } catch (e) { console.error(e); }
 }
 
@@ -915,7 +2102,183 @@ function renderPagination() {
 function selectRecord(did) {
   currentDataDID = did;
   document.getElementById('verify-did').value = did;
-  showToast('已选择记录', 'ok');
+  showToast('已定位到「四重验证」模块，可验证原始数据 / 模拟篡改', 'ok');
+  const sec = document.querySelector('.section:nth-of-type(2)');
+  if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/* ─── 多选 + 批量操作 ─── */
+let selectedDids = new Set();
+
+function onRowCheck(box) {
+  const did = box.getAttribute('data-did');
+  if (box.checked) selectedDids.add(did); else selectedDids.delete(did);
+  const tr = box.closest('tr');
+  if (tr) tr.classList.toggle('selected', box.checked);
+  updateBatchBar();
+}
+
+function toggleSelectAll(master) {
+  const boxes = document.querySelectorAll('#records-body .rec-check');
+  boxes.forEach(b => {
+    b.checked = master.checked;
+    const did = b.getAttribute('data-did');
+    if (master.checked) selectedDids.add(did); else selectedDids.delete(did);
+    const tr = b.closest('tr');
+    if (tr) tr.classList.toggle('selected', master.checked);
+  });
+  updateBatchBar();
+}
+
+function updateBatchBar() {
+  const bar = document.getElementById('batch-bar');
+  const count = selectedDids.size;
+  document.getElementById('batch-count').textContent = count;
+  bar.classList.toggle('show', count > 0);
+  const master = document.getElementById('select-all');
+  if (master) {
+    const boxes = document.querySelectorAll('#records-body .rec-check');
+    master.checked = boxes.length > 0 && count === boxes.length;
+    master.indeterminate = count > 0 && count < boxes.length;
+  }
+}
+
+function clearSelection() {
+  selectedDids.clear();
+  document.querySelectorAll('#records-body .rec-check').forEach(b => { b.checked = false; const tr = b.closest('tr'); if (tr) tr.classList.remove('selected'); });
+  const master = document.getElementById('select-all'); if (master) { master.checked = false; master.indeterminate = false; }
+  updateBatchBar();
+  showToast('已清空选择', 'ok');
+}
+
+async function batchVerify() {
+  if (selectedDids.size === 0) { showToast('请先勾选记录', 'err'); return; }
+  const dids = Array.from(selectedDids);
+  const info = document.getElementById('batch-info');
+  info.textContent = '验证中 ' + dids.length + ' 条…';
+  let okCount = 0, failCount = 0;
+  const lines = [];
+  for (const did of dids) {
+    try {
+      const r = await securePost('/api/verify', { data_did: did });
+      const d = await r.json();
+      const ok = d.all_verified === true;
+      if (ok) okCount++; else failCount++;
+      lines.push((ok ? '✓ ' : '✗ ') + did.substring(0, 24) + '… — ' + (d.verdict || (ok ? '通过' : '异常')));
+    } catch (e) {
+      failCount++;
+      lines.push('✗ ' + did.substring(0, 24) + '… — 请求失败: ' + e.message);
+    }
+  }
+  info.textContent = '完成 ✓' + okCount + ' ✗' + failCount;
+  showBatchResult('批量验证结果（' + dids.length + ' 条）', lines.join('\n'), failCount === 0);
+}
+
+async function batchReveal() {
+  if (selectedDids.size === 0) { showToast('请先勾选记录', 'err'); return; }
+  const dids = Array.from(selectedDids);
+  const info = document.getElementById('batch-info');
+  info.textContent = '揭示中 ' + dids.length + ' 条…';
+  const lines = [];
+  for (const did of dids) {
+    try {
+      const r = await securePost('/api/reveal', { data_did: did });
+      const d = await r.json();
+      if (d.success) {
+        lines.push('• ' + did.substring(0, 24) + '…\n  fingerprint: ' + d.fingerprint + '\n  nonce: ' + d.nonce + '\n  commitment: ' + d.commitment);
+      } else {
+        lines.push('• ' + did.substring(0, 24) + '… — 揭示失败: ' + (d.error || '未知'));
+      }
+    } catch (e) {
+      lines.push('• ' + did.substring(0, 24) + '… — 请求失败: ' + e.message);
+    }
+  }
+  info.textContent = '已揭示 ' + dids.length + ' 条';
+  showBatchResult('批量承诺揭示（' + dids.length + ' 条 · 仅披露 nonce，不泄露原始数据）', lines.join('\n\n'), true);
+}
+
+function batchExport() {
+  if (selectedDids.size === 0) { showToast('请先勾选记录', 'err'); return; }
+  // 需要完整记录字段，重新拉取
+  fetch('/api/records?page=1&per_page=10000').then(r => r.json()).then(async data => {
+    const records = Array.isArray(data) ? data : (data.records || []);
+    const chosen = records.filter(rec => selectedDids.has(rec.data_did));
+    const header = ['DID','类型','算法','指纹','承诺C','链上TX','时间'];
+    const rows = chosen.map(rec => [rec.data_did, rec.data_type, rec.algorithm, rec.fingerprint, rec.commitment, rec.chain_tx_id || '本地', rec.timestamp]);
+    const csv = '﻿' + [header, ...rows].map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '存证记录_' + chosen.length + '条_' + new Date().toISOString().slice(0,10) + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('已导出 ' + chosen.length + ' 条记录为 CSV', 'ok');
+  }).catch(e => showToast('导出失败: ' + e.message, 'err'));
+}
+
+function batchShare() {
+  if (selectedDids.size === 0) { showToast('请先勾选记录', 'err'); return; }
+  const dids = Array.from(selectedDids);
+  const url = location.origin + '/?share=' + encodeURIComponent(dids.join(','));
+  // 复制链接
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => showToast('分享链接已复制到剪贴板（含 ' + dids.length + ' 条）', 'ok'),
+      () => showToast('分享链接：' + url, 'ok'));
+  } else {
+    showToast('分享链接：' + url, 'ok');
+  }
+  // 同时生成可下载分享包（离线携带完整存证凭证）
+  fetch('/api/records?page=1&per_page=10000').then(r => r.json()).then(data => {
+    const records = Array.isArray(data) ? data : (data.records || []);
+    const chosen = records.filter(rec => selectedDids.has(rec.data_did))
+      .map(rec => ({ data_did: rec.data_did, data_type: rec.data_type, algorithm: rec.algorithm, fingerprint: rec.fingerprint, commitment: rec.commitment, chain_tx_id: rec.chain_tx_id || '', timestamp: rec.timestamp }));
+    const pkg = { generated_at: new Date().toISOString(), platform: 'LIVESTOCK DATA TRUST', record_count: chosen.length, records: chosen };
+    const blob = new Blob([JSON.stringify(pkg, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = '存证分享包_' + chosen.length + '条.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }).catch(e => console.warn('share package failed', e));
+}
+
+function showBatchResult(title, text, ok) {
+  const div = document.getElementById('verify-result');
+  div.style.display = 'block';
+  div.className = 'result ' + (ok ? 'ok' : 'err');
+  div.innerHTML = '<div class="result-title"><span class="ico"></span>' + title + '</div>' +
+    '<div class="code-block" style="white-space:pre-wrap;word-break:break-all;">' + text.replace(/</g, '&lt;') + '</div>';
+  div.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+/* ─── 分享链接落地：读取 ?share= 展示只读存证 ─── */
+async function initShareFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const share = params.get('share');
+  if (!share) return;
+  const dids = share.split(',').map(s => s.trim()).filter(Boolean);
+  if (dids.length === 0) return;
+  const panel = document.getElementById('share-panel');
+  const cards = document.getElementById('share-cards');
+  panel.classList.add('show');
+  cards.innerHTML = '<div style="font-size:var(--t-micro);color:var(--ink-3);">正在加载 ' + dids.length + ' 条共享存证…</div>';
+  const items = [];
+  for (const did of dids) {
+    try {
+      const r = await securePost('/api/reveal', { data_did: did });
+      const d = await r.json();
+      items.push({ did, ok: d.success, fingerprint: d.fingerprint, commitment: d.commitment, note: d.note });
+    } catch (e) {
+      items.push({ did, ok: false, err: e.message });
+    }
+  }
+  cards.innerHTML = items.map(it => {
+    const head = '<div class="sc-title ' + (it.ok ? 'share-ok' : 'share-bad') + '">' + (it.ok ? '✓ ' : '✗ ') + it.did.substring(0, 30) + '…</div>';
+    const meta = it.ok
+      ? '<div class="sc-meta">fingerprint: ' + it.fingerprint + '<br>commitment: ' + it.commitment + '</div>'
+      : '<div class="sc-meta">加载失败: ' + (it.err || '未知') + '</div>';
+    return '<div class="share-card">' + head + meta + '</div>';
+  }).join('');
 }
 
 async function revealNonce(did) {
@@ -945,6 +2308,7 @@ let recordsPage = 1;
 let recordsPerPage = 10;
 let recordsTotal = 0;
 let recordsTotalPages = 1;
+let allRecordsForDropdown = null; // 缓存全部记录，用于验证下拉框
 
 
 let wmDiffData = null;
@@ -969,6 +2333,31 @@ function onWmModeChange() {
   }
 }
 
+async function extractWatermark() {
+  if (!wmWatermarkedImage) { showToast('请先嵌入水印', 'err'); return; }
+  if (!wmEmbedParams) { showToast('缺少提取参数', 'err'); return; }
+  const btn = document.getElementById('btn-extract-wm');
+  if (btn) { btn.disabled = true; btn.textContent = '提取中…'; }
+  try {
+    const r = await securePost('/api/watermark/extract', { image: wmWatermarkedImage, params: wmEmbedParams });
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
+    const resp = await r.json();
+    const did = resp.did || '';
+    const ok = resp.success !== false && (resp.hash_verified || (did && did.indexOf('did') === 0));
+    const el = document.getElementById('wm-extract-result');
+    el.style.display = 'block';
+    el.className = 'verify-result ' + (ok ? 'ok' : 'bad');
+    el.innerHTML = (ok ? '✓ 水印提取成功' : '✗ 水印提取失败') +
+      '<div class="verify-detail">提取 DID：' + esc(did || '（无）') +
+      '　校验：' + (resp.hash_verified ? '通过' : '未通过') + '</div>';
+    showToast(ok ? '水印提取成功' : '水印提取失败', ok ? 'ok' : 'err');
+  } catch (e) {
+    showToast('水印提取失败：' + (e.message || e), 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '提取水印'; }
+  }
+}
+
 function handleWatermarkUpload(event) {
   const file = event.target.files[0];
   if (!file) return;
@@ -977,6 +2366,7 @@ function handleWatermarkUpload(event) {
     const img = new Image();
     img.onload = function() {
       wmOriginalImage = img;
+      wmWatermarkedImage = null;
       const box = document.getElementById('wm-original');
       box.innerHTML = '';
       box.appendChild(img.cloneNode());
@@ -1020,6 +2410,8 @@ async function embedWatermark() {
 
     // Store params for later extraction
     wmEmbedParams = { mode: mode, did: did, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [], ecc_pad: resp.ecc_pad || 0, max_order: parseInt(document.getElementById('wm-order')?.value || 25), p: parseFloat(document.getElementById('wm-p')?.value || 0.3) };
+    wmWatermarkedImage = resp.watermarked_image;
+    const exBtn = document.getElementById('btn-extract-wm'); if (exBtn) exBtn.disabled = false;
 
     // Compute diff image SYNCHRONOUSLY using offscreen canvas with both images
     const diffCanvas = document.getElementById('wm-diff-canvas');
@@ -1172,9 +2564,66 @@ document.addEventListener('DOMContentLoaded', function() {
   }, 500);
 });
 
-function resetForm() {
-  document.getElementById('raw-data').value = `检疫编号: JC2024-00158
-检疫日期: 2024-01-15
+// ── 各数据类型的示例原始数据 ──
+/* ─── 业务追溯 ─── */
+function runTrace() {
+  const q = (document.getElementById('trace-q').value || '').trim();
+  const box = document.getElementById('trace-result');
+  if (!q) { box.innerHTML = '<p class="trace-empty">请输入检疫编号 / 批次号 / DID。</p>'; return; }
+  box.innerHTML = '<p class="trace-empty">追溯中…</p>';
+  fetch('/api/records/trace?q=' + encodeURIComponent(q))
+    .then(function (r) { return r.json(); })
+    .then(function (d) { renderTrace(d); })
+    .catch(function (e) { box.innerHTML = '<p class="trace-empty">追溯失败：' + esc(e.message) + '</p>'; });
+}
+
+function renderTrace(d) {
+  const box = document.getElementById('trace-result');
+  if (!d.stages || !d.stages.length) {
+    box.innerHTML = '<p class="trace-empty">未找到与「' + esc(d.query) + '」相关的记录。试试链上的演示批次 <b>JC2026-DEMO01</b>。</p>';
+    return;
+  }
+  const typeLabel = { quarantine: '检疫记录', transaction: '交易记录', transport: '运输记录', slaughter: '屠宰记录', '通用': '通用记录' };
+  const sym = { done: '✓', blocked: '!', required: '!', missing: '·' };
+  let flow = '<div class="stage-flow">';
+  d.stages.forEach(function (s, i) {
+    flow += '<div class="stage-node ' + s.status + '"><div class="stage-dot">' + (sym[s.status] || '·') + '</div><div class="stage-label">' + esc(s.label) + '</div></div>';
+    if (i < d.stages.length - 1) flow += '<div class="stage-line ' + (s.status === 'done' ? 'filled' : '') + '"></div>';
+  });
+  flow += '</div>';
+
+  let badge;
+  if (d.summary.complete) badge = '<div class="trace-badge ok">● 链路完整：申报 → 出证 → 交易 → 运输 → 屠宰 全环节可追溯</div>';
+  else if (d.summary.quarantine_ok === false) badge = '<div class="trace-badge fail">● 检疫未通过：该批次不得进入流通，需无害化处理</div>';
+  else badge = '<div class="trace-badge gap">● 链路存在缺口：灰显阶段尚未存证</div>';
+
+  let cards = '<div class="trace-cards">';
+  (d.linked || []).forEach(function (r) {
+    const m = r.metadata || {};
+    const title = m['检疫编号'] || m['交易编号'] || m['运输编号'] || m['屠宰编号'] || (r.data_did || '').substring(0, 16);
+    cards += '<div class="trace-card"><div class="tc-type">' + (typeLabel[r.data_type] || r.data_type) + '</div>'
+      + '<div class="tc-title">' + esc(title) + '</div>'
+      + (m['检疫结果'] ? '<div class="tc-row">检疫结果：' + esc(m['检疫结果']) + '</div>' : '')
+      + (m['动物种类'] ? '<div class="tc-row">动物种类：' + esc(m['动物种类']) + '　数量：' + esc(m['数量'] || '-') + '</div>' : '')
+      + (m['随车检疫证号'] ? '<div class="tc-row">随车检疫证号：' + esc(m['随车检疫证号']) + '</div>' : '')
+      + (m['备注'] ? '<div class="tc-row">备注：' + esc(m['备注']) + '</div>' : '')
+      + (r.chain_tx_id ? '<div class="tc-row">链上交易：' + esc(String(r.chain_tx_id).substring(0, 18)) + '…　高度 ' + esc(r.block_height) + '</div>' : '')
+      + '<div class="tc-did">DID: ' + esc(r.data_did) + '</div>'
+      + (r.party_binding ? ('<div class="tc-party ' + (r.party_binding.registered ? 'ok' : 'warn') + '">主体: ' + esc(r.party_binding.name || r.party_binding.code || '—') + (r.party_binding.registered ? ' ✓已登记' : ' ⚠未登记') + '</div>') : '')
+      + '</div>';
+  });
+  cards += '</div>';
+
+  let unreg = '';
+  if (d.summary.unregistered_parties && d.summary.unregistered_parties.length) {
+    unreg = '<div class="trace-badge warn">● 链路含 ' + d.summary.unregistered_parties.length + ' 条未登记主体存证：可信度待核实</div>';
+  }
+  box.innerHTML = flow + unreg + badge + cards;
+}
+
+const SAMPLE_DATA = {
+  quarantine: `检疫编号: JC2026-00158
+检疫日期: 2026-01-15
 检疫机构: XX市畜牧兽医检疫站
 检疫结果: 合格
 动物种类: 肉牛
@@ -1182,7 +2631,50 @@ function resetForm() {
 养殖场名称: XX生态养殖场
 养殖场地址: XX省XX市XX县XX镇
 检疫员: 张XX
-有效期至: 2024-07-15`;
+有效期至: 2026-07-15`,
+  transaction: `交易编号: TX2026-03892
+交易日期: 2026-06-20
+卖方: XX生态养殖场（统一社会信用代码: 91110000MA01XXXXX2）
+买方: XX肉类食品有限公司（统一社会信用代码: 91110000MA01XXXXY8）
+动物种类: 肉牛
+数量: 85
+单价(元/头): 18500.00
+总金额(元): 1572500.00
+交易地点: XX省XX市牲畜交易中心
+经手人: 李XX
+备注: 附检疫合格证明 JC2026-00231`,
+  transport: `运输编号: YS2026-01147
+运输日期: 2026-06-22
+起运地: XX省XX市XX县XX镇
+目的地: XX省YY市YY区XX屠宰场
+动物种类: 肉牛
+数量: 85
+运输车辆: 豫N·XXXXX（厢式恒温运输车）
+司机: 王XX（联系电话: 138****5678）
+随车检疫证号: JC2026-00231
+计划到达时间: 2026-06-23 06:00
+运输条件: 温度5℃~18℃，通风良好`,
+  slaughter: `屠宰编号: TZ2026-00763
+屠宰日期: 2026-06-23
+屠宰场: XX肉类食品有限公司（定点屠宰许可证: A201400XX）
+动物种类: 肉牛
+来源养殖场: XX生态养殖场
+数量: 85
+宰前检验: 合格（临床健康，无禁用药物残留）
+宰后检验: 合格（胴体评级A级）
+检验员: 赵XX（执业兽医资格证: V2021XXXX）
+胴体重量(kg): 17850.00
+副产品: 内脏/头蹄/皮张已同步入库`
+};
+
+function onDataTypeChange() {
+  const type = document.getElementById('data-type').value;
+  document.getElementById('raw-data').value = SAMPLE_DATA[type] || SAMPLE_DATA.quarantine;
+  if (document.getElementById('cert-no').value.trim()) applyCertToRaw();
+}
+
+function resetForm() {
+  onDataTypeChange();
   document.getElementById('submit-result').style.display = 'none';
   document.getElementById('verify-result').style.display = 'none';
   currentDataDID = null;
@@ -1412,6 +2904,8 @@ async function verifyUploaded() {
 
 init();
 </script>
+  </div><!-- /main-content -->
+</div><!-- /app-layout -->
 </body>
 </html>
 <!-- DEPLOY-v7-1784748047 -->

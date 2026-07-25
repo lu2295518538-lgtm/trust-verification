@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>JS_TEST</title>
+<style>
+  body { font-family: monospace; padding: 20px; }
+  .test { padding: 20px; margin: 10px 0; border-radius: 4px; font-size: 18px; font-weight: bold; }
+  .JS_RAN { background: #4CAF50; color: white; }
+  .JS_DIDNT_RUN { background: #f44336; color: white; }
+  .JS_ERROR { background: #ff9800; color: white; }
+</style>
+</head>
+<body>
+
+<h1>JS 执行测试</h1>
+
+<div class="test" id="test1">测试 1: HTML 默认 - 如果看到这个红色背景, JS 没执行</div>
+<div class="test" id="test2">测试 2: HTML 默认 - 如果看到这个红色背景, JS 没执行</div>
+<div class="test" id="test3">测试 3: HTML 默认 - 如果看到这个红色背景, JS 没执行</div>
+
+<script>
+// 测试 1: 立即执行
+document.getElementById('test1').textContent = '测试 1: JS 立即执行成功 - 如果看到这个绿色背景, JS 在运行';
+document.getElementById('test1').className = 'test JS_RAN';
+
+// 测试 2: 监听器
+document.getElementById('test2').textContent = '测试 2: DOMContentLoaded 监听器 - 如果看到这个绿色背景, JS 在运行';
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('test2').className = 'test JS_RAN';
+});
+
+// 测试 3: fetch API
+fetch('/api/records').then(function(r){return r.json()}).then(function(data) {
+  document.getElementById('test3').textContent = '测试 3: fetch 成功 - 拿到 ' + data.length + ' 条记录';
+  document.getElementById('test3').className = 'test JS_RAN';
+}).catch(function(e) {
+  document.getElementById('test3').textContent = '测试 3: fetch 失败 - ' + e.message;
+  document.getElementById('test3').className = 'test JS_ERROR';
+});
+
+// 全局错误捕获
+window.addEventListener('error', function(e) {
+  var div = document.createElement('div');
+  div.className = 'test JS_ERROR';
+  div.textContent = 'JS 错误: ' + e.message + ' (' + e.filename + ':' + e.lineno + ')';
+  document.body.appendChild(div);
+});
+</script>
+
+</body>
+</html>

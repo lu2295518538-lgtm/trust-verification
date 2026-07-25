@@ -25,3 +25,13 @@ Thumbs.db
 
 # Chainmaker
 chainmaker-go/
+
+# Secrets / runtime state (regenerated on first run)
+core/ca_store.json
+*.bak
+*.bak2
+.bak-*
+patch_*.py
+flask.pid
+app.log
+flask_debug.log

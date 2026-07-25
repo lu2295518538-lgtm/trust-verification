@@ -6,3 +6,4 @@ itsdangerous==2.2.0
 MarkupSafe==3.0.3
 blinker==1.9.0
 gunicorn==23.0.0
+ecdsa==0.19.2

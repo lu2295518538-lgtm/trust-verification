@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Trust Verification App - v6 final"""
-import sys, os, json, time, secrets, sqlite3, base64, io, hashlib
+import sys, os, json, time, secrets, sqlite3, base64, io, hashlib, re
 import numpy as np
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from contextlib import contextmanager
 from flask import Flask, request, jsonify, render_template
@@ -12,7 +12,7 @@ from core.fingerprint import generate_fingerprint, verify_fingerprint, canonical
 from core.sm2_sign import generate_keypair, sign_string, verify as sm2_verify
 from core.did_manager import generate_did, create_on_chain_record
 from core.metadata_extractor import extract_metadata
-from core.vc_manager import request_credential, verify_credential, construct_presentation, verify_presentation, get_issuer_info
+from core.vc_manager import request_credential, verify_credential, construct_presentation, verify_presentation, get_issuer_info, get_ca_directory, ca_store
 from core.chainmaker_client import check_chain_status, store_on_chain, query_from_chain, verify_against_chain
 from core.watermark_dft import (embed_entire_watermark, extract_entire_watermark, _img_to_gray, zero_watermark_extract, encode_watermark_message, zero_watermark_generate)
 from core.phfrfm_core import phfrfm_zero_generate, phfrfm_zero_extract
@@ -116,6 +116,12 @@ def api_csrf():
     t = secrets.token_hex(32); _csrf_tokens[t] = time.time()+3600
     return jsonify({'csrf_token':t})
 
+@app.route('/api/check-key')
+@require_key
+def api_check_key():
+    # 轻量校验端点：仅验证 API Key 是否有效（无副作用），供前端实时校验调用
+    return jsonify({'success': True, 'valid': True, 'key': 'ok'})
+
 @app.route('/')
 def index():
     # Server-side pre-render records so page works even without JS
@@ -146,13 +152,16 @@ def api_submit():
     meta = extract_metadata(raw, dtype)
     fp_r = generate_fingerprint(raw, meta)
     fp = fp_r['fingerprint']
+    pb = get_party_binding(raw, meta)
+    if pb:
+        meta['_party_binding'] = pb
     cmt_r = commit(fp); C = cmt_r['commitment']; r_val = str(cmt_r['nonce'])
     sig_r = sign_string(fp, OWNER_KEYPAIR['private_key']); sig = json.dumps(sig_r)
     did_r = generate_did(entity_type='data'); did = did_r['did']
     chain = store_on_chain(did, fp, C, sig, json.dumps(meta)); tx = chain.get('tx_id',''); bh = chain.get('block_height',0)
     with get_db() as db:
         from datetime import datetime
-        ts = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f+00:00')
+        ts = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%dT%H:%M:%S.%f+08:00')
         db.execute('INSERT INTO commitments(data_did,data_type,raw_data,fingerprint,commitment,randomness,owner_did,owner_key,chain_tx_id,block_height,metadata,timestamp) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', (did,dtype,raw,fp,C,r_val,OWNER_DID,OWNER_KEYPAIR.get('public_key',''),tx,bh,json.dumps(meta),ts))
         db.commit()
     return jsonify({
@@ -324,6 +333,78 @@ def api_records():
     with get_db() as db:
         rows = db.execute('SELECT * FROM commitments ORDER BY id DESC').fetchall()
     return jsonify(records_to_list(rows))
+
+@app.route('/api/records/trace')
+def api_records_trace():
+    """业务追溯：按检疫编号/批次/DID 关联同一批次的全链路记录，并映射到标准业务阶段。"""
+    q = (request.args.get('q') or '').strip()
+    with get_db() as db:
+        rows = db.execute('SELECT * FROM commitments ORDER BY id ASC').fetchall()
+    recs = records_to_list(rows)
+
+    def parse_meta(rec):
+        raw = rec.get('metadata')
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except Exception:
+                raw = {}
+        if not isinstance(raw, dict):
+            raw = {}
+        inner = raw.get('metadata')
+        bizf = inner if isinstance(inner, dict) else raw
+        return raw, bizf
+
+    def matches(rec):
+        if q and q in (rec.get('data_did') or ''):
+            return True
+        if q and q in (str(rec.get('metadata')) or ''):
+            return True
+        return False
+
+    linked = [r for r in recs if matches(r)]
+    dt_order = {'quarantine': 0, 'transaction': 1, 'transport': 2, 'slaughter': 3, '\u901a\u7528': 4}
+    linked_sorted = sorted(linked, key=lambda r: dt_order.get(r.get('data_type'), 9))
+
+    qrec = next((r for r in linked if r.get('data_type') == 'quarantine'), None)
+    qraw, qbiz = parse_meta(qrec) if qrec else ({}, {})
+    ok = qbiz.get('\u68c0\u75ab\u7ed3\u679c') in ('\u5408\u683c', '\u901a\u8fc7') if qbiz else None
+
+    stages = []
+    if qrec:
+        stages.append({'key': 'declare', 'label': '\u7533\u62a5\u53d7\u7406', 'status': 'done', 'record': qrec.get('data_did')})
+        stages.append({'key': 'inspect', 'label': '\u4ea7\u5730\u68c0\u75ab', 'status': 'done', 'record': qrec.get('data_did')})
+        stages.append({'key': 'cert', 'label': '\u51fa\u5177\u68c0\u75ab\u5408\u683c\u8bc1', 'status': 'done' if ok else 'blocked', 'record': qrec.get('data_did')})
+    else:
+        for k, lab in (('declare', '\u7533\u62a5\u53d7\u7406'), ('inspect', '\u4ea7\u5730\u68c0\u75ab'), ('cert', '\u51fa\u5177\u68c0\u75ab\u5408\u683c\u8bc1')):
+            stages.append({'key': k, 'label': lab, 'status': 'missing', 'record': None})
+    trec = next((r for r in linked if r.get('data_type') == 'transaction'), None)
+    prec = next((r for r in linked if r.get('data_type') == 'transport'), None)
+    srec = next((r for r in linked if r.get('data_type') == 'slaughter'), None)
+    stages.append({'key': 'trade', 'label': '\u4ea4\u6613\u6d41\u8f6c', 'status': 'done' if trec else 'missing', 'record': trec.get('data_did') if trec else None})
+    stages.append({'key': 'trans', 'label': '\u8fd0\u8f93\u914d\u9001', 'status': 'done' if prec else 'missing', 'record': prec.get('data_did') if prec else None})
+    stages.append({'key': 'slaughter', 'label': '\u5c60\u5bb0\u52a0\u5de5', 'status': 'done' if srec else 'missing', 'record': srec.get('data_did') if srec else None})
+    if qrec and not ok:
+        stages.append({'key': 'dispose', 'label': '\u65e0\u5bb3\u5316\u5904\u7406', 'status': 'required', 'record': None})
+
+    complete = bool(qrec and trec and prec and srec and ok is not False)
+    return jsonify({
+        'query': q,
+        'stages': stages,
+        'linked': [{
+            'data_did': r.get('data_did'), 'data_type': r.get('data_type'),
+            'timestamp': r.get('timestamp'), 'metadata': parse_meta(r)[1],
+            'chain_tx_id': r.get('chain_tx_id'), 'block_height': r.get('block_height'),
+            'owner_did': r.get('owner_did'),
+            'confidence': parse_meta(r)[0].get('confidence'),
+            'need_review': parse_meta(r)[0].get('need_review'),
+            'party_binding': parse_meta(r)[0].get('_party_binding')
+        } for r in linked_sorted],
+        'summary': {'found': len(linked), 'complete': complete, 'quarantine_ok': ok,
+                    'unregistered_parties': [r.get('data_did') for r in linked
+                                             if isinstance(parse_meta(r)[0].get('_party_binding'), dict)
+                                             and parse_meta(r)[0]['_party_binding'].get('registered') is False]}
+    })
 
 @app.route('/api/reveal', methods=['POST'])
 @require_key
@@ -760,18 +841,59 @@ def api_chain_verify():
 @app.route('/api/issuer_info')
 def api_issuer(): return jsonify(get_issuer_info())
 
+@app.route('/api/issuers')
+def api_issuers():
+    # 根 CA + 签发者证书目录（只读，供前端"签发者目录"展示）
+    return jsonify(get_ca_directory())
+
+@app.route('/api/issuers/revoke', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_issuer_revoke():
+    body = request.get_json(silent=True) or {}
+    did = body.get('did')
+    reason = body.get('reason', '管理员吊销')
+    if not did: return jsonify({'success': False, 'error': '缺少 did'}), 400
+    ok = ca_store.revoke(did, reason)
+    if not ok: return jsonify({'success': False, 'error': '签发者不存在'}), 404
+    return jsonify({'success': True, 'did': did, 'status': 'revoked'})
+
+@app.route('/api/issuers/restore', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_issuer_restore():
+    body = request.get_json(silent=True) or {}
+    did = body.get('did')
+    if not did: return jsonify({'success': False, 'error': '缺少 did'}), 400
+    ok = ca_store.restore(did)
+    if not ok: return jsonify({'success': False, 'error': '签发者不存在'}), 404
+    return jsonify({'success': True, 'did': did, 'status': 'valid'})
+
 @app.route('/api/vc/request', methods=['POST'])
 @require_key
 @require_csrf
 def api_vc():
     d = request.get_json() or {}
-    return jsonify(request_credential(d.get('owner_did',OWNER_DID), d.get('owner_name',OWNER_NAME), d.get('data_did',''), d.get('fingerprint',''), d.get('data_type','通用'), d.get('chain_tx_id','')))
+    try:
+        vc = request_credential(
+            metadata=d.get('metadata', {}),
+            holder_did=d.get('holder_did', OWNER_DID),
+            issuer_did=d.get('issuer_did'),
+            issuer_name=d.get('issuer_name'),
+            modules=d.get('modules'),
+            use_zk=bool(d.get('use_zk', False)),
+        )
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    return jsonify(vc)
 
 @app.route('/api/vc/verify', methods=['POST'])
 @require_key
 @require_csrf
 def api_vc_verify():
-    return jsonify(verify_credential((request.get_json() or {}).get('vc',{})))
+    return jsonify(verify_credential((request.get_json() or {}).get('vc', {})))
 
 @app.route('/api/vp/construct', methods=['POST'])
 @require_key
@@ -779,14 +901,146 @@ def api_vc_verify():
 def api_vp_construct():
     d = request.get_json() or {}
     vc = d.get('vc') or d.get('credentials')
-    if vc and not isinstance(vc,list): vc = [vc]
-    return jsonify(construct_presentation(vc, OWNER_KEYPAIR.get('private_key',''), OWNER_KEYPAIR.get('public_key_x',''), OWNER_KEYPAIR.get('public_key_y','')))
+    if isinstance(vc, list): vc = vc[0] if vc else None
+    return jsonify(construct_presentation(
+        vc,
+        modules=d.get('modules'),
+        challenge=d.get('challenge'),
+        domain=d.get('domain'),
+    ))
 
 @app.route('/api/vp/verify', methods=['POST'])
 @require_key
 @require_csrf
 def api_vp_verify():
-    return jsonify(verify_presentation((request.get_json() or {}).get('vp',{})))
+    return jsonify(verify_presentation((request.get_json() or {}).get('vp', {})))
+
+CREDIT_RE = re.compile(r"(?:统一社会信用代码|信用代码|养殖场代码)[:：]\s*([0-9A-Z]{18})")
+
+
+def get_seed_parties():
+    """主数据目录：养殖场 / 屠宰场 / 官方兽医。种子规范主体 + 聚合库内已出现信用代码。"""
+    seeds = [
+        {"role": "farm", "name": "XX生态养殖场", "credit_code": "91110000MA01XXXXX2",
+         "did": "did:chainmaker:party:farm:xxst", "region": "华北"},
+        {"role": "farm", "name": "绿源牧业有限公司", "credit_code": "91110000MA02BBBBB3",
+         "did": "did:chainmaker:party:farm:ly", "region": "东北"},
+        {"role": "farm", "name": "康达生态养殖基地", "credit_code": "91110000MA03CCCCC4",
+         "did": "did:chainmaker:party:farm:kd", "region": "西南"},
+        {"role": "slaughter", "name": "XX肉类食品有限公司", "credit_code": "91110000MA01XXXXY8",
+         "license": "A201400XX", "did": "did:chainmaker:party:slaughter:xxmr", "region": "华北"},
+        {"role": "slaughter", "name": "鲜丰屠宰加工股份有限公司", "credit_code": "91110000MA04DDDDD5",
+         "license": "A201400YY", "did": "did:chainmaker:party:slaughter:xf", "region": "华东"},
+        {"role": "vet", "name": "XX市畜牧兽医检疫站", "did": "did:chainmaker:party:vet:xx", "region": "华北"},
+        {"role": "vet", "name": "YY区动物卫生监督所", "did": "did:chainmaker:party:vet:yy", "region": "华东"},
+    ]
+    try:
+        con = sqlite3.connect(DB_PATH); con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        seen = set(p["credit_code"] for p in seeds if p.get("credit_code"))
+        cur.execute("SELECT metadata FROM commitments")
+        for r in cur.fetchall():
+            m = r["metadata"]
+            if not m:
+                continue
+            try:
+                payload = json.loads(m).get("metadata", {})
+            except Exception:
+                continue
+            txt = json.dumps(payload, ensure_ascii=False) if isinstance(payload, dict) else str(payload)
+            for code in re.findall(r"统一社会信用代码[:：]\s*([0-9A-Z]{18})", txt):
+                if code not in seen:
+                    seen.add(code)
+                    seeds.append({"role": "unknown", "name": code, "credit_code": code,
+                                  "did": None, "region": "", "history": True})
+        con.close()
+    except Exception:
+        pass
+    return seeds
+
+
+def get_party_binding(raw, meta):
+    """在提交数据中提取统一社会信用代码，若命中主数据注册主体则建立 DID 双向绑定。"""
+    text = raw or ''
+    try:
+        text += '\n' + json.dumps(meta, ensure_ascii=False)
+    except Exception:
+        pass
+    code = None
+    for c in CREDIT_RE.findall(text):
+        code = c
+        break
+    if not code:
+        return None
+    seeds = get_seed_parties()
+    party = next((p for p in seeds if p.get("credit_code") == code), None)
+    if party:
+        return {"code": code, "name": party.get("name"), "did": party.get("did"),
+                "role": party.get("role"), "registered": True,
+                "ca_linked": bool(party.get("did") and party.get("did") in (ca_store.trusted_issuer_dids() if ca_store else []))}
+    return {"code": code, "name": None, "did": None, "role": "unknown", "registered": False, "ca_linked": False}
+
+
+def lookup_party(code=None, name=None, did=None):
+    """双向绑定查询：给定信用代码/名称/DID，返回主体登记状态、DID 绑定与链上记录数。"""
+    seeds = get_seed_parties()
+    party = None
+    if did:
+        party = next((p for p in seeds if p.get("did") == did), None)
+    if not party and code:
+        party = next((p for p in seeds if p.get("credit_code") == code), None)
+    if not party and name:
+        party = next((p for p in seeds if p.get("name") == name), None)
+    found = bool(party)
+    did_bound = bool(party and party.get("did"))
+    registered = bool(party and party.get("did") and not party.get("history"))
+    ca_linked = False
+    if party and party.get("did"):
+        try:
+            if party["did"] in (ca_store.trusted_issuer_dids() if ca_store else []):
+                ca_linked = True
+            else:
+                for iss in (get_ca_directory() or {}).get("issuers", []):
+                    sub = iss.get("subject", {})
+                    if sub.get("name") and party.get("name") and (sub["name"] in party["name"] or party["name"] in sub["name"]):
+                        ca_linked = True
+                        break
+        except Exception:
+            ca_linked = False
+    records_count = 0
+    key = code or (party.get("credit_code") if party else None)
+    try:
+        con = sqlite3.connect(DB_PATH); con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute("SELECT metadata FROM commitments")
+        for r in cur.fetchall():
+            m = r["metadata"]
+            if not m:
+                continue
+            if key and key in m:
+                records_count += 1
+            elif party and party.get("name") and party["name"] in m:
+                records_count += 1
+        con.close()
+    except Exception:
+        pass
+    return {"found": found, "party": party, "did_bound": did_bound,
+            "registered": registered, "ca_linked": ca_linked, "records_count": records_count}
+
+
+@app.route('/api/parties')
+def api_parties():
+    seeds = get_seed_parties()
+    return jsonify({"parties": seeds, "count": len(seeds)})
+
+
+@app.route('/api/party/lookup')
+def api_party_lookup():
+    code = (request.args.get('code') or '').strip()
+    name = (request.args.get('name') or '').strip()
+    did = (request.args.get('did') or '').strip()
+    return jsonify(lookup_party(code=code, name=name, did=did))
+
 
 if __name__ == '__main__':
     print(f'Owner DID: {OWNER_DID}')
