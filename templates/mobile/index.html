@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>畜牧检疫 · 现场出证</title>
+<script src="/static/js/jsQR.js" defer></script>
+<script src="/static/js/qrcode.js" defer></script>
+<style>
+  :root{
+    --bg1:#0f2e2a; --bg2:#103b3a; --bg3:#0b1f24;
+    --brand:#19c39c; --brand-d:#0e9b7c; --accent:#f6b73c;
+    --ink:#eaf6f3; --ink-dim:#9fc4bc; --line:rgba(255,255,255,.12);
+    --ok:#2fd07a; --no:#ff6b6b; --warn:#f6b73c;
+    --card:rgba(255,255,255,.06); --card2:rgba(255,255,255,.09);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Noto Sans SC",sans-serif;
+    color:var(--ink); min-height:100vh;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(25,195,156,.18), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(246,183,60,.12), transparent 55%),
+      linear-gradient(160deg, var(--bg1), var(--bg2) 55%, var(--bg3));
+    background-attachment:fixed;
+  }
+  .app{max-width:520px;margin:0 auto;padding:env(safe-area-inset-top) 14px calc(14px + env(safe-area-inset-bottom));padding-bottom:24px}
+  header.top{padding:18px 4px 10px;display:flex;align-items:center;gap:10px}
+  header.top .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--brand),var(--brand-d));display:flex;align-items:center;justify-content:center;font-size:20px;box-shadow:0 6px 18px rgba(25,195,156,.35)}
+  header.top h1{font-size:18px;margin:0;letter-spacing:.5px}
+  header.top .sub{font-size:11px;color:var(--ink-dim);margin-top:2px}
+  .tabs{display:flex;gap:8px;margin:8px 0 14px;background:var(--card);padding:5px;border-radius:14px;border:1px solid var(--line)}
+  .tab{flex:1;min-height:44px;border:0;background:transparent;color:var(--ink-dim);font-size:15px;font-weight:600;border-radius:10px;transition:.18s}
+  .tab.active{background:linear-gradient(135deg,var(--brand),var(--brand-d));color:#06241d;box-shadow:0 6px 16px rgba(25,195,156,.3)}
+  .panel{display:none}
+  .panel.active{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 10px;color:var(--ink);display:flex;align-items:center;gap:8px}
+  .card h2 .dot{width:8px;height:8px;border-radius:50%;background:var(--brand)}
+  label.fld{display:block;font-size:12px;color:var(--ink-dim);margin:10px 0 4px}
+  input,select,textarea{
+    width:100%;min-height:44px;padding:10px 12px;border-radius:11px;border:1px solid var(--line);
+    background:rgba(0,0,0,.22);color:var(--ink);font-size:15px;outline:none;font-family:inherit;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--brand)}
+  textarea{resize:vertical;min-height:70px}
+  .row2{display:flex;gap:10px}
+  .row2>*{flex:1}
+  .btn{
+    width:100%;min-height:48px;border:0;border-radius:13px;font-size:16px;font-weight:700;color:#06241d;
+    background:linear-gradient(135deg,var(--brand),var(--brand-d));box-shadow:0 8px 20px rgba(25,195,156,.32);
+    margin-top:6px;cursor:pointer;transition:.15s;
+  }
+  .btn:active{transform:translateY(1px)}
+  .btn.sec{background:var(--card2);color:var(--ink);box-shadow:none;border:1px solid var(--line)}
+  .btn.warn{background:linear-gradient(135deg,var(--accent),#e09a1f);color:#3a2a05;box-shadow:0 8px 20px rgba(246,183,60,.3)}
+  .scanline{font-size:12px;color:var(--ink-dim);margin:8px 0}
+  .seg{display:flex;gap:8px;margin:6px 0 2px}
+  .seg button{flex:1;min-height:42px;border:1px solid var(--line);background:rgba(0,0,0,.2);color:var(--ink-dim);border-radius:11px;font-size:14px;font-weight:600}
+  .seg button.on{border-color:var(--brand);color:var(--brand);background:rgba(25,195,156,.12)}
+  video#scan-video{width:100%;border-radius:14px;background:#000;display:none;aspect-ratio:4/3;object-fit:cover}
+  .status{font-size:13px;padding:8px 10px;border-radius:10px;background:rgba(0,0,0,.22);margin-top:8px;color:var(--ink-dim)}
+  .status.ok{color:var(--ok)} .status.err{color:var(--no)}
+  .badge{display:inline-block;padding:6px 12px;border-radius:999px;font-size:13px;font-weight:700;margin:2px 0}
+  .badge.ok{background:rgba(47,208,122,.16);color:var(--ok);border:1px solid rgba(47,208,122,.4)}
+  .badge.no{background:rgba(255,107,107,.16);color:var(--no);border:1px solid rgba(255,107,107,.4)}
+  .kv{font-size:13px;color:var(--ink);line-height:1.7}
+  .kv b{color:var(--ink-dim);font-weight:600;margin-right:6px}
+  .qrbox{display:flex;justify-content:center;background:#fff;border-radius:14px;padding:12px;margin:10px 0}
+  .qrbox svg{max-width:100%;height:auto}
+  .hint{font-size:12px;color:var(--ink-dim);margin-top:6px}
+  .json{font-size:11px;color:var(--ink-dim);white-space:pre-wrap;word-break:break-all;max-height:160px;overflow:auto;background:rgba(0,0,0,.25);padding:10px;border-radius:10px;margin-top:8px}
+  .collapse-btn{background:none;border:0;color:var(--brand);font-size:13px;margin-top:6px;cursor:pointer;padding:4px}
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:rgba(8,20,22,.95);color:#fff;padding:11px 18px;border-radius:12px;font-size:14px;opacity:0;transition:.25s;pointer-events:none;border:1px solid var(--line);z-index:50;max-width:90%}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{border-color:rgba(255,107,107,.6)} .toast.ok{border-color:rgba(25,195,156,.6)}
+  .switch{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--ink-dim);margin-top:10px}
+  .switch input{width:auto;min-height:auto}
+  /* ---- 批次全链路迷你视图 ---- */
+  .chain-badge{font-size:13px;padding:8px 10px;border-radius:10px;margin:8px 0;line-height:1.45}
+  .chain-badge.ok{background:rgba(47,208,122,.12);color:var(--ok);border:1px solid rgba(47,208,122,.4)}
+  .chain-badge.fail{background:rgba(255,107,107,.14);color:var(--no);border:1px solid rgba(255,107,107,.4)}
+  .chain-badge.gap{background:rgba(255,255,255,.06);color:var(--ink-dim);border:1px solid var(--line)}
+  .chain-flow{margin:6px 0}
+  .chain-stage{display:flex;gap:10px;align-items:flex-start;padding:5px 0}
+  .chain-dot{width:22px;height:22px;border-radius:50%;flex:0 0 22px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;margin-top:1px}
+  .chain-dot.done{background:rgba(47,208,122,.18);color:var(--ok);border:1px solid rgba(47,208,122,.5)}
+  .chain-dot.missing{background:rgba(255,107,107,.14);color:var(--no);border:1px solid rgba(255,107,107,.4)}
+  .chain-dot.blocked{background:rgba(246,183,60,.16);color:var(--warn);border:1px solid rgba(246,183,60,.45)}
+  .chain-dot.required{background:rgba(246,183,60,.16);color:var(--warn);border:1px solid rgba(246,183,60,.45)}
+  .chain-body{flex:1;min-width:0}
+  .chain-label{font-size:14px;color:var(--ink)}
+  .chain-ts{font-size:11px;color:var(--ink-dim);margin-top:1px}
+  .chain-line{height:10px;width:2px;margin-left:10px;background:var(--line)}
+  .chain-line.timeout{background:var(--no)}
+  .chain-risk{font-size:13px;padding:7px 10px;border-radius:9px;margin:6px 0;line-height:1.45}
+  .chain-risk.ok{background:rgba(47,208,122,.12);color:var(--ok);border:1px solid rgba(47,208,122,.4)}
+  .chain-risk.high{background:rgba(255,107,107,.14);color:var(--no);border:1px solid rgba(255,107,107,.4)}
+  .chain-risk.med{background:rgba(246,183,60,.14);color:var(--warn);border:1px solid rgba(246,183,60,.45)}
+  .chain-risk.low{background:rgba(255,255,255,.06);color:var(--ink-dim);border:1px solid var(--line)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="logo">🐮</div>
+    <div>
+      <h1>畜牧检疫现场端</h1>
+      <div class="sub">移动现场出证 · 扫码关联 · 位置取证</div>
+    </div>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" id="tab-issue" onclick="switchTab('issue')">现场出证</button>
+    <button class="tab" id="tab-verify" onclick="switchTab('verify')">现场核验</button>
+  </div>
+
+  <!-- ============ 出证 ============ -->
+  <section class="panel active" id="panel-issue">
+    <div class="card">
+      <h2><span class="dot"></span>第一步 · 扫码关联</h2>
+      <div class="seg" id="scan-mode">
+        <button class="on" data-mode="record" onclick="setScanMode('record',this)">申报单 / 批次</button>
+        <button data-mode="party" onclick="setScanMode('party',this)">主体（场/厂）</button>
+      </div>
+      <div class="scanline">扫申报单二维码可预填检疫对象；扫主体码可预填养殖场/屠宰场信息。</div>
+      <button class="btn sec" id="scan-btn" onclick="startIssueScan()">📷 扫码</button>
+      <video id="scan-video" playsinline></video>
+      <canvas id="scan-canvas" style="display:none"></canvas>
+      <div class="status" id="scan-status">未扫码</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>第二步 · 现场位置取证</h2>
+      <button class="btn sec" onclick="getGPS()">📍 获取当前定位</button>
+      <div class="status" id="gps-status">未定位</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>第三步 · 检疫信息</h2>
+      <label class="fld">检疫编号 / 批次号 *</label>
+      <input id="f-data_id" placeholder="如 JC2026-0001">
+      <div class="row2">
+        <div><label class="fld">名称 *</label><input id="f-data_name" placeholder="如 生猪"></div>
+        <div><label class="fld">类型</label><input id="f-data_type" value="quarantine"></div>
+      </div>
+      <label class="fld">货主 / 养殖场 *</label>
+      <input id="f-owner" placeholder="养殖场名称">
+      <div class="row2">
+        <div><label class="fld">组织代码</label><input id="f-org_id" placeholder="如 X1"></div>
+        <div><label class="fld">持证人 DID</label><input id="f-did" placeholder="did:chainmaker:..."></div>
+      </div>
+      <label class="fld">指纹（可选，留空自动）</label>
+      <input id="f-fingerprint" placeholder="可留空">
+      <label class="fld">描述</label>
+      <textarea id="f-description" placeholder="检疫对象描述"></textarea>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>第四步 · 检疫结果</h2>
+      <label class="fld">检疫结论 *</label>
+      <select id="f-result">
+        <option value="合格">合格</option>
+        <option value="不合格">不合格</option>
+        <option value="待复核">待复核</option>
+      </select>
+      <label class="fld">备注</label>
+      <input id="f-note" placeholder="现场备注">
+      <div class="row2">
+        <div><label class="fld">检疫员姓名 *</label><input id="f-vet-name" placeholder="如 张三"></div>
+        <div><label class="fld">检疫员编号</label><input id="f-vet-id" placeholder="如 VET01"></div>
+      </div>
+      <div class="hint">证书以全披露方式出具，下游扫码可读取现场检疫结果、定位与检疫员。零知识模式仅在 VP（凭证出示）层生效，不适用于本端直接分享的证书。</div>
+      <button class="btn" id="issue-btn" onclick="issueCert()">✅ 出具检疫合格证</button>
+    </div>
+
+    <div class="card" id="cert-card" style="display:none">
+      <h2><span class="dot"></span>电子检疫证已出具</h2>
+      <div id="cert-summary" class="kv"></div>
+      <div class="qrbox" id="cert-qr"></div>
+      <div class="hint">出示此二维码供下游扫码核验。或：</div>
+      <div class="row2" style="margin-top:8px">
+        <button class="btn sec" onclick="copyCert()">复制证书</button>
+        <button class="btn sec" onclick="downloadCert()">下载 JSON</button>
+      </div>
+      <button class="collapse-btn" onclick="toggleJson('cert-json')">查看完整证书 JSON ▾</button>
+      <div class="json" id="cert-json" style="display:none"></div>
+    </div>
+  </section>
+
+  <!-- ============ 核验 ============ -->
+  <section class="panel" id="panel-verify">
+    <div class="card">
+      <h2><span class="dot"></span>扫码核验他人证书</h2>
+      <div class="scanline">扫描对方出示的证书二维码，自动校验真伪与现场检疫结果。</div>
+      <button class="btn sec" id="v-scan-btn" onclick="startVerifyScan()">📷 扫码核验</button>
+      <video id="v-scan-video" playsinline></video>
+      <canvas id="v-scan-canvas" style="display:none"></canvas>
+    </div>
+    <div class="card">
+      <h2><span class="dot"></span>或粘贴证书 JSON</h2>
+      <textarea id="v-json" placeholder="在此粘贴证书 JSON 文本"></textarea>
+      <button class="btn" onclick="verifyFromInput()">核验</button>
+    </div>
+    <div class="card">
+      <h2><span class="dot"></span>批次全链路</h2>
+      <div class="scanline">输入批次号，查看该批次全链路状态与风险预警（只读）。</div>
+      <div class="row2">
+        <input id="v-batch" placeholder="批次号，如 JC2026-DEMO01">
+        <button class="btn sec" style="margin-top:0" onclick="showBatchChain()">查看</button>
+      </div>
+      <div id="v-chain"></div>
+    </div>
+    <div class="card" id="v-result-card" style="display:none">
+      <h2><span class="dot"></span>核验结果</h2>
+      <div id="v-badge"></div>
+      <div id="v-summary" class="kv"></div>
+      <button class="collapse-btn" onclick="toggleJson('v-json-out')">查看完整核验报告 ▾</button>
+      <div class="json" id="v-json-out" style="display:none"></div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+var API_KEY = "lk-2026-trust-verification-key";
+var _csrf = null;
+var state = { gps:null, scanMode:"record", lastVC:null };
+
+/* ---------- 工具 ---------- */
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function toast(msg, type){
+  var t = $("toast"); t.textContent = msg; t.className = "toast show" + (type?(" "+type):"");
+  clearTimeout(toast._t); toast._t = setTimeout(function(){ t.className = "toast"; }, 2600);
+}
+function toggleJson(id){ var e = $(id); e.style.display = (e.style.display==="none")?"block":"none"; }
+
+async function securePost(url, body){
+  if(!_csrf){
+    var c = await fetch("/api/csrf-token", {headers:{"X-API-Key":API_KEY}}).then(function(r){return r.json();});
+    _csrf = c.csrf_token;
+  }
+  async function doPost(){
+    return fetch(url, {method:"POST", headers:{"Content-Type":"application/json","X-API-Key":API_KEY,"X-CSRF-Token":_csrf}, body:JSON.stringify(body)});
+  }
+  var res = await doPost();
+  if(res.status === 403){
+    var c2 = await fetch("/api/csrf-token", {headers:{"X-API-Key":API_KEY}}).then(function(r){return r.json();});
+    _csrf = c2.csrf_token;
+    res = await doPost();
+  }
+  return res.json();
+}
+
+/* ---------- Tab ---------- */
+function switchTab(name){
+  $("tab-issue").classList.toggle("active", name==="issue");
+  $("tab-verify").classList.toggle("active", name==="verify");
+  $("panel-issue").classList.toggle("active", name==="issue");
+  $("panel-verify").classList.toggle("active", name==="verify");
+  if(name==="verify"){ readVerifyDeepLink(); }
+}
+function setScanMode(mode, btn){
+  state.scanMode = mode;
+  var bs = $("scan-mode").querySelectorAll("button");
+  bs.forEach(function(b){ b.classList.toggle("on", b===btn); });
+}
+
+/* ---------- 扫码（通用） ---------- */
+var scanning = false;
+async function runScanner(videoId, canvasId, onResult){
+  if(scanning) return;
+  var video = $(videoId), canvas = $(canvasId);
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    toast("当前环境不支持摄像头", "err"); return;
+  }
+  var stream;
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+  }catch(e){ toast("无法打开摄像头：" + (e && e.message ? e.message : e), "err"); return; }
+  video.style.display = "block";
+  video.srcObject = stream; await video.play();
+  scanning = true;
+  (function tick(){
+    if(!scanning) return;
+    if(video.readyState === video.HAVE_ENOUGH_DATA){
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+      var ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      var img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      var code = (typeof jsQR === "function") ? jsQR(img.data, img.width, img.height) : null;
+      if(code && code.data){
+        scanning = false;
+        stream.getTracks().forEach(function(t){ t.stop(); });
+        video.style.display = "none";
+        onResult(code.data); return;
+      }
+    }
+    requestAnimationFrame(tick);
+  })();
+}
+
+function startIssueScan(){
+  runScanner("scan-video", "scan-canvas", function(text){
+    if(state.scanMode === "record"){ prefillFromRecord(text); }
+    else { prefillFromParty(text); }
+  });
+}
+function startVerifyScan(){
+  runScanner("v-scan-video", "v-scan-canvas", function(text){ handleVerifyScan(text); });
+}
+
+/* ---------- 预填：申报单 ---------- */
+async function prefillFromRecord(dataDid){
+  $("scan-status").className = "status"; $("scan-status").textContent = "正在关联：" + dataDid;
+  try{
+    var r = await fetch("/api/records/trace?q=" + encodeURIComponent(dataDid)).then(function(x){return x.json();});
+    var rec = (r.linked && r.linked.length) ? r.linked[0] : (r.qrec || null);
+    if(rec){
+      var meta = {};
+      try{ meta = (typeof rec.metadata === "string") ? JSON.parse(rec.metadata) : (rec.metadata || {}); }catch(e){ meta = {}; }
+      var biz = meta.metadata || meta; // 兼容 {metadata:{...}} 包裹
+      var b = biz.basic || {}, o = biz.ownership || {}, c = biz.content || {};
+      if(b.data_id) $("f-data_id").value = b.data_id;
+      if(b.data_name) $("f-data_name").value = b.data_name;
+      if(b.data_type) $("f-data_type").value = b.data_type;
+      if(o.owner) $("f-owner").value = o.owner;
+      if(o.org_id) $("f-org_id").value = o.org_id;
+      if(o.did) $("f-did").value = o.did;
+      if(c.fingerprint) $("f-fingerprint").value = c.fingerprint;
+      if(c.description) $("f-description").value = c.description;
+      $("scan-status").className = "status ok";
+      $("scan-status").textContent = "已预填：" + (b.data_name || dataDid);
+    } else {
+      $("f-data_id").value = dataDid;
+      $("scan-status").className = "status";
+      $("scan-status").textContent = "未找到记录，已填入编号，请补充其余信息";
+    }
+  }catch(e){
+    $("f-data_id").value = dataDid;
+    $("scan-status").className = "status err";
+    $("scan-status").textContent = "关联失败，已填入编号：" + dataDid;
+  }
+}
+
+/* ---------- 预填：主体 ---------- */
+async function prefillFromParty(code){
+  $("scan-status").className = "status"; $("scan-status").textContent = "正在查询主体：" + code;
+  try{
+    var r = await fetch("/api/party/lookup?code=" + encodeURIComponent(code)).then(function(x){return x.json();});
+    var p = r.party || r;
+    if(p && (p.name || p.did)){
+      if(p.name) $("f-owner").value = p.name;
+      if(p.org_id) $("f-org_id").value = p.org_id;
+      if(p.did) $("f-did").value = p.did;
+      $("scan-status").className = "status ok";
+      $("scan-status").textContent = "已预填主体：" + (p.name || code);
+    } else {
+      $("scan-status").className = "status err";
+      $("scan-status").textContent = "未识别主体码：" + code;
+    }
+  }catch(e){
+    $("scan-status").className = "status err";
+    $("scan-status").textContent = "主体查询失败：" + code;
+  }
+}
+
+/* ---------- GPS ---------- */
+function getGPS(){
+  if(!navigator.geolocation){ $("gps-status").className="status err"; $("gps-status").textContent="设备不支持定位"; return; }
+  $("gps-status").className = "status"; $("gps-status").textContent = "定位中…";
+  navigator.geolocation.getCurrentPosition(function(pos){
+    state.gps = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy, ts: new Date().toISOString() };
+    $("gps-status").className = "status ok";
+    $("gps-status").textContent = "已定位 " + state.gps.lat.toFixed(5) + ", " + state.gps.lng.toFixed(5) + " (±" + (state.gps.accuracy||0).toFixed(0) + "m)";
+  }, function(err){
+    $("gps-status").className = "status err";
+    $("gps-status").textContent = "定位失败：" + (err && err.message ? err.message : err);
+  }, {enableHighAccuracy:true, timeout:10000, maximumAge:0});
+}
+
+/* ---------- 出证 ---------- */
+async function issueCert(){
+  var data_id = $("f-data_id").value.trim();
+  var vet_name = $("f-vet-name").value.trim();
+  var result = $("f-result").value;
+  if(!data_id){ toast("请填写检疫编号", "err"); return; }
+  if(!vet_name){ toast("请填写检疫员姓名", "err"); return; }
+  if(!state.gps){ toast("请先获取现场定位", "err"); return; }
+  var did = $("f-did").value.trim() || ("did:chainmaker:holder:" + data_id);
+  var metadata = {
+    basic: {
+      data_id: data_id,
+      data_name: $("f-data_name").value.trim() || "未命名",
+      data_type: $("f-data_type").value.trim() || "quarantine"
+    },
+    ownership: {
+      owner: $("f-owner").value.trim() || "未知",
+      org_id: $("f-org_id").value.trim() || "",
+      did: did,
+      license: "proprietary"
+    },
+    content: {
+      fingerprint: $("f-fingerprint").value.trim() || "",
+      description: $("f-description").value.trim() || "",
+      tags: []
+    },
+    inspection: {
+      gps: state.gps,
+      vet: { name: vet_name, id: $("f-vet-id").value.trim() },
+      result: result,
+      note: $("f-note").value.trim()
+    }
+  };
+  var body = {
+    metadata: metadata,
+    holder_did: did,
+    issuer_did: "",
+    issuer_name: "",
+    modules: ["basic","ownership","content","inspection"],
+    use_zk: false
+  };
+  $("issue-btn").disabled = true; $("issue-btn").textContent = "出具中…";
+  try{
+    var vc = await securePost("/api/vc/request", body);
+    if(vc && vc.credentialSubject){
+      state.lastVC = vc;
+      showCert(vc);
+      toast("检疫证已出具", "ok");
+    } else {
+      toast("出证失败：" + ((vc && vc.error) || "未知错误"), "err");
+    }
+  }catch(e){
+    toast("出证异常：" + (e && e.message ? e.message : e), "err");
+  }finally{
+    $("issue-btn").disabled = false; $("issue-btn").textContent = "✅ 出具检疫合格证";
+  }
+}
+
+function showCert(vc){
+  $("cert-card").style.display = "block";
+  var sub = vc.credentialSubject || {};
+  var insp = sub.inspection || {};
+  var g = (insp.gps || {});
+  var html = "";
+  html += "<div><b>编号</b>" + esc(sub.data_id) + "</div>";
+  html += "<div><b>持证人</b>" + esc(sub.id) + "</div>";
+  if(insp.result) html += "<div><b>检疫结论</b>" + esc(insp.result) + "</div>";
+  if(insp.vet) html += "<div><b>检疫员</b>" + esc((insp.vet.name||"") + (insp.vet.id?(" (#"+insp.vet.id+")"):"")) + "</div>";
+  if(g.lat!=null) html += "<div><b>定位</b>" + esc(g.lat.toFixed(5)+", "+g.lng.toFixed(5)) + "</div>";
+  html += "<div><b>签发者</b>" + esc((vc.issuer && vc.issuer.name) || "") + "</div>";
+  html += "<div><b>披露模式</b>" + (vc.credentialSubject.zk_proof ? "零知识" : "全披露") + "</div>";
+  $("cert-summary").innerHTML = html;
+  // 二维码（编码紧凑证书 JSON；过大则提示用复制/下载）
+  var json = JSON.stringify(vc);
+  var box = $("cert-qr");
+  try{
+    var qr = qrcode(0, "L");
+    qr.addData(json);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({cellSize:3, margin:6, scalable:true});
+  }catch(e){
+    box.innerHTML = '<div class="hint">证书数据过大，无法生成二维码。请使用"复制"或"下载"分享。</div>';
+  }
+  $("cert-json").textContent = json;
+}
+
+function copyCert(){
+  if(!state.lastVC) return;
+  var txt = JSON.stringify(state.lastVC, null, 2);
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){ toast("证书已复制", "ok"); }, function(){ toast("复制失败", "err"); });
+  } else { toast("当前环境不支持复制", "err"); }
+}
+function downloadCert(){
+  if(!state.lastVC) return;
+  var blob = new Blob([JSON.stringify(state.lastVC, null, 2)], {type:"application/json"});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "quarantine_cert_" + ((state.lastVC.credentialSubject && state.lastVC.credentialSubject.data_id) || "vc") + ".json";
+  a.click();
+}
+
+/* ---------- 核验 ---------- */
+function readVerifyDeepLink(){
+  var h = location.hash || "";
+  var m = h.match(/[#&]vc=([^&]+)/);
+  if(m){
+    try{
+      var vc = JSON.parse(decodeURIComponent(m[1]));
+      if(vc && vc["@context"]){ verifyVC(vc); location.hash = ""; }
+    }catch(e){}
+  }
+}
+function handleVerifyScan(text){
+  var vc = null;
+  try{ vc = JSON.parse(text); }catch(e){}
+  if(!vc){
+    var m = text.match(/[?&]vc=([^&]+)/);
+    if(m){ try{ vc = JSON.parse(decodeURIComponent(m[1])); }catch(e2){} }
+  }
+  if(vc && vc["@context"]){ verifyVC(vc); }
+  else { toast("未识别到有效证书", "err"); }
+}
+function verifyFromInput(){
+  var txt = $("v-json").value.trim();
+  if(!txt){ toast("请粘贴证书 JSON", "err"); return; }
+  var vc = null;
+  try{ vc = JSON.parse(txt); }catch(e){ toast("JSON 解析失败", "err"); return; }
+  if(!vc || !vc["@context"]){ toast("不是有效证书", "err"); return; }
+  verifyVC(vc);
+}
+async function verifyVC(vc){
+  $("v-result-card").style.display = "block";
+  try{
+    var r = await securePost("/api/vc/verify", {vc: vc});
+    var badge = $("v-badge");
+    if(r.valid){
+      badge.innerHTML = '<span class="badge ok">✅ 验证通过</span>';
+    } else {
+      badge.innerHTML = '<span class="badge no">⛔ 验证未通过</span>';
+    }
+    var modeTxt = (r.mode==="zk_only")?"零知识":((r.mode==="selective")?"选择性披露":"全披露");
+    var html = "";
+    html += "<div><b>有效性</b>" + (r.valid?"通过":"未通过") + "</div>";
+    html += "<div><b>模式</b>" + modeTxt + "</div>";
+    html += "<div><b>签发者</b>" + esc(r.issuer_name || r.issuer || "") + "</div>";
+    html += "<div><b>签发者可信</b>" + (r.issuer_trusted?"是":"否") + (r.issuer_status?(" ("+esc(r.issuer_status)+")"):"") + "</div>";
+    html += "<div><b>持证人</b>" + esc(r.owner || "") + "</div>";
+    if(r.owner_name) html += "<div><b>持证人名称</b>" + esc(r.owner_name) + "</div>";
+    var sub = (vc.credentialSubject) || {};
+    var insp = sub.inspection || {};
+    if(insp.result) html += "<div><b>现场检疫结论</b>" + esc(insp.result) + "</div>";
+    if(insp.vet) html += "<div><b>检疫员</b>" + esc((insp.vet.name||"") + (insp.vet.id?(" (#"+insp.vet.id+")"):"")) + "</div>";
+    if(insp.gps && insp.gps.lat!=null) html += "<div><b>现场定位</b>" + esc(insp.gps.lat.toFixed(5)+", "+insp.gps.lng.toFixed(5)) + "</div>";
+    if(r.errors && r.errors.length) html += "<div><b>问题</b>" + esc(r.errors.join("；")) + "</div>";
+    $("v-summary").innerHTML = html;
+    $("v-json-out").textContent = JSON.stringify(r, null, 2);
+  }catch(e){
+    $("v-badge").innerHTML = '<span class="badge no">⛔ 核验异常</span>';
+    $("v-summary").innerHTML = "<div>" + esc((e && e.message) || e) + "</div>";
+  }
+}
+
+/* ---------- 批次全链路（迷你只读视图） ---------- */
+async function showBatchChain(){
+  var q = $("v-batch").value.trim();
+  if(!q){ toast("请输入批次号", "err"); return; }
+  var box = $("v-chain");
+  box.innerHTML = '<div class="status">查询中…</div>';
+  try{
+    var r = await fetch("/api/records/trace?q=" + encodeURIComponent(q)).then(function(x){return x.json();});
+    if(!r.stages || !r.stages.length){
+      box.innerHTML = '<div class="status err">未找到与「' + esc(q) + '」相关的记录</div>';
+      return;
+    }
+    var sym = { done:'✓', blocked:'!', required:'!', missing:'·' };
+    function fmtTs(ts){ if(!ts) return ''; return String(ts).replace('T',' ').substring(0,16); }
+    function fmtGap(a,b){
+      if(!a||!b) return '';
+      var da=Date.parse(a), db2=Date.parse(b);
+      if(isNaN(da)||isNaN(db2)) return '';
+      var h=Math.abs(db2-da)/3600000;
+      if(h<1) return Math.round(h*60)+'m';
+      if(h<48) return Math.round(h)+'h';
+      return (h/24).toFixed(1)+'d';
+    }
+    var sum = r.summary || {};
+    var html = '';
+    if(sum.complete) html += '<div class="chain-badge ok">● 链路完整：申报 → 出证 → 交易 → 运输 → 屠宰 全环节可追溯</div>';
+    else if(sum.quarantine_ok === false) html += '<div class="chain-badge fail">● 检疫未通过：该批次不得进入流通，需无害化处理</div>';
+    else html += '<div class="chain-badge gap">● 链路存在缺口：灰显阶段尚未存证</div>';
+
+    html += '<div class="chain-flow">';
+    r.stages.forEach(function(s, i){
+      var ts = s.ts ? '<div class="chain-ts">' + esc(fmtTs(s.ts)) + '</div>' : '';
+      html += '<div class="chain-stage"><div class="chain-dot ' + s.status + '">' + (sym[s.status]||'·') + '</div>'
+            + '<div class="chain-body"><div class="chain-label">' + esc(s.label) + '</div>' + ts + '</div></div>';
+      if(i < r.stages.length - 1){
+        var nx = r.stages[i + 1];
+        var gap = fmtGap(s.ts, nx.ts);
+        html += '<div class="chain-line' + (s.timeout ? ' timeout' : '') + '"></div>'
+              + (gap ? '<div class="chain-ts" style="margin-left:10px">' + (s.timeout ? '⚠ 间隔 ' + gap + ' 超 SLA' : gap) + '</div>' : '');
+      }
+    });
+    html += '</div>';
+
+    var risks = sum.risks || [];
+    html += '<div class="chain-risk-panel">';
+    if(!risks.length){
+      html += '<div class="chain-risk ok">✓ 未检出风险：全链路合规</div>';
+    } else {
+      risks.forEach(function(rk){
+        var cls = rk.level === 'high' ? 'high' : (rk.level === 'medium' ? 'med' : 'low');
+        var icon = rk.level === 'high' ? '⛔ ' : (rk.level === 'medium' ? '⚠ ' : '• ');
+        html += '<div class="chain-risk ' + cls + '">' + icon + esc(rk.msg) + '</div>';
+      });
+    }
+    html += '</div>';
+    box.innerHTML = html;
+  }catch(e){
+    box.innerHTML = '<div class="status err">查询失败：' + esc((e && e.message) || e) + '</div>';
+  }
+}
+
+/* 若以 deep link 打开（如 /m/#verify?vc=...）自动核验 */
+readVerifyDeepLink();
+</script>
+</body>
+</html>

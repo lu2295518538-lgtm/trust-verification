@@ -127,6 +127,12 @@ def index():
     # Server-side pre-render records so page works even without JS
     return render_template('index.html')
 
+@app.route('/m')
+@app.route('/m/')
+def mobile_app():
+    return render_template('mobile/index.html')
+
+
 @app.route('/jstest')
 def jstest():
     return render_template('jstest.html')
@@ -388,6 +394,56 @@ def api_records_trace():
         stages.append({'key': 'dispose', 'label': '\u65e0\u5bb3\u5316\u5904\u7406', 'status': 'required', 'record': None})
 
     complete = bool(qrec and trec and prec and srec and ok is not False)
+
+    # ---- 时间戳 + 风险预警（向后兼容增强）----
+    _ts_map = {
+        'declare': (qrec or {}).get('timestamp'),
+        'inspect': (qrec or {}).get('timestamp'),
+        'cert': (qrec or {}).get('timestamp'),
+        'trade': (trec or {}).get('timestamp'),
+        'trans': (prec or {}).get('timestamp'),
+        'slaughter': (srec or {}).get('timestamp'),
+        'dispose': None,
+    }
+    for _st in stages:
+        _st['ts'] = _ts_map.get(_st['key'])
+
+    _unreg = [r for r in linked if isinstance(parse_meta(r)[0].get('_party_binding'), dict)
+              and parse_meta(r)[0]['_party_binding'].get('registered') is False]
+    SLA_HOURS = {'cert->trade': 24, 'trade->trans': 12, 'trans->slaughter': 48}
+    _order = ['cert', 'trade', 'trans', 'slaughter']
+    _present = [(k, _ts_map.get(k)) for k in _order if _ts_map.get(k)]
+    risks = []
+    if qrec and ok is False:
+        risks.append({'level': 'high', 'msg': '检疫未通过：该批次禁止流通，须进行无害化处理'})
+    for _k in ('declare', 'inspect', 'cert', 'trans'):
+        _st = next((x for x in stages if x['key'] == _k), None)
+        if _st and _st['status'] == 'missing':
+            risks.append({'level': 'high', 'msg': '缺失关键环：' + _st['label']})
+    _sl = next((x for x in stages if x['key'] == 'slaughter'), None)
+    if _sl and _sl['status'] == 'missing':
+        risks.append({'level': 'medium', 'msg': '末端屠宰环节缺失，全链路未闭环'})
+    for i in range(len(_present) - 1):
+        a_key, a_ts = _present[i]; b_key, b_ts = _present[i + 1]
+        if a_ts and b_ts and isinstance(a_ts, str) and isinstance(b_ts, str):
+            try:
+                from datetime import datetime
+                da = datetime.fromisoformat(a_ts.replace('Z', '+00:00'))
+                db2 = datetime.fromisoformat(b_ts.replace('Z', '+00:00'))
+                dh = (db2 - da).total_seconds() / 3600.0
+                _thr = SLA_HOURS.get(a_key + '->' + b_key)
+                if _thr and dh > _thr:
+                    _alab = next((x['label'] for x in stages if x['key'] == a_key), a_key)
+                    _blab = next((x['label'] for x in stages if x['key'] == b_key), b_key)
+                    risks.append({'level': 'medium', 'msg': '超时：%s -> %s 间隔 %.1fh（阈值 %dh）' % (_alab, _blab, dh, _thr)})
+                    _st_a = next((x for x in stages if x['key'] == a_key), None)
+                    if _st_a:
+                        _st_a['timeout'] = True
+            except Exception:
+                pass
+    if _unreg:
+        risks.append({'level': 'medium', 'msg': '链路含 %d 条未登记主体存证，可信度待核实' % len(_unreg)})
+
     return jsonify({
         'query': q,
         'stages': stages,
@@ -401,9 +457,8 @@ def api_records_trace():
             'party_binding': parse_meta(r)[0].get('_party_binding')
         } for r in linked_sorted],
         'summary': {'found': len(linked), 'complete': complete, 'quarantine_ok': ok,
-                    'unregistered_parties': [r.get('data_did') for r in linked
-                                             if isinstance(parse_meta(r)[0].get('_party_binding'), dict)
-                                             and parse_meta(r)[0]['_party_binding'].get('registered') is False]}
+                    'unregistered_parties': [r.get('data_did') for r in _unreg],
+                    'risks': risks}
     })
 
 @app.route('/api/reveal', methods=['POST'])
@@ -871,6 +926,53 @@ def api_issuer_restore():
     if not ok: return jsonify({'success': False, 'error': '签发者不存在'}), 404
     return jsonify({'success': True, 'did': did, 'status': 'valid'})
 
+# ---------- 外部商业 CA 信任锚（联邦） ----------
+@app.route('/api/external-cas')
+@require_key
+def api_external_cas():
+    # 只读，供前端"签发者目录 · 外部信任锚"展示
+    return jsonify({'external_cas': ca_store.list_external_cas()})
+
+@app.route('/api/external-cas', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_external_cas_add():
+    body = request.get_json(silent=True) or {}
+    name = (body.get('name') or '').strip()
+    rx = (body.get('root_public_key_x') or '').strip()
+    ry = (body.get('root_public_key_y') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': '缺少外部 CA 名称'}), 400
+    if not rx or not ry:
+        return jsonify({'success': False, 'error': '缺少外部 CA 根公钥 (x/y)'}), 400
+    members = body.get('members') or []
+    if isinstance(members, str):
+        members = [m.strip() for m in members.replace('，', ',').split(',') if m.strip()]
+    entry = ca_store.add_external_ca(
+        name=name, root_public_key_x=rx, root_public_key_y=ry,
+        members=members, note=(body.get('note') or '').strip(),
+        did_namespace=(body.get('did_namespace') or '').strip())
+    return jsonify({'success': True, 'external_ca': entry})
+
+@app.route('/api/external-cas/<ca_id>/disable', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_external_cas_disable(ca_id):
+    ok = ca_store.set_external_ca_status(ca_id, 'disabled')
+    if not ok: return jsonify({'success': False, 'error': '外部 CA 不存在'}), 404
+    return jsonify({'success': True, 'id': ca_id, 'status': 'disabled'})
+
+@app.route('/api/external-cas/<ca_id>/enable', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_external_cas_enable(ca_id):
+    ok = ca_store.set_external_ca_status(ca_id, 'active')
+    if not ok: return jsonify({'success': False, 'error': '外部 CA 不存在'}), 404
+    return jsonify({'success': True, 'id': ca_id, 'status': 'active'})
+
 @app.route('/api/vc/request', methods=['POST'])
 @require_key
 @require_csrf
@@ -907,6 +1009,7 @@ def api_vp_construct():
         modules=d.get('modules'),
         challenge=d.get('challenge'),
         domain=d.get('domain'),
+        disclose_fields=d.get('disclose_fields'),
     ))
 
 @app.route('/api/vp/verify', methods=['POST'])

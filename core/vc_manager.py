@@ -158,7 +158,7 @@ def request_credential(metadata, holder_did, issuer_did=None, issuer_name=None,
     return vc
 
 
-def verify_credential(vc):
+def verify_credential(vc, disclosure=None):
     """验证 VC：① 发行方 SM2 签名 + CA 信任锚 ② Pedersen 承诺 / Schnorr ZKP 校验。"""
     errors = []
     proof = vc.get("proof", {})
@@ -180,6 +180,7 @@ def verify_credential(vc):
         _trust = ca_store.verify_issuer(_iss_did, pub_x, pub_y)
         issuer_trusted = _trust["trusted"]
         issuer_status = _trust["status"]
+        issuer_external_ca = _trust.get("external_ca")
         if not issuer_trusted:
             errors.append("签发者不可信：" + _trust["reason"])
         # vc_json 由 _signable_json 生成：与签发时一致，剔除 proof 与明文 selected_data
@@ -207,6 +208,18 @@ def verify_credential(vc):
             commitment_valid = zk_verified
             if not zk_verified:
                 errors.append("Schnorr 零知识证明验证失败")
+        elif disclosure == "selective":
+            mode = "selective"
+            if not issuer_trusted:
+                errors.append("签发者不可信，选择性披露无法采信")
+            try:
+                from ecdsa import NIST256p
+                from ecdsa.ellipticcurve import Point
+                Point(NIST256p.curve, int(cx, 16), int(cy, 16))
+                commitment_valid = True
+            except Exception:
+                commitment_valid = False
+                errors.append("Pedersen 承诺坐标非法（不在 P-256 曲线上）")
         elif "blinding_factor_r" in subject and "triple_hash_x" in subject:
             mode = "full"
             # 关键：从（可能被篡改的）selected_data 重新计算三元组哈希 x，
@@ -245,6 +258,7 @@ def verify_credential(vc):
         "issuer_name": vc.get("issuer", {}).get("name", ""),
         "issuer_trusted": issuer_trusted,
         "issuer_status": issuer_status,
+        "issuer_external_ca": issuer_external_ca,
         "issuer_cert_serial": (vc.get("proof", {}) or {}).get("certSerial"),
         "owner": subject.get("id", ""),
         "owner_name": subject.get("ownership", {}).get("owner")
@@ -258,8 +272,47 @@ def verify_credential(vc):
     }
 
 
-def construct_presentation(vc, modules=None, challenge=None, domain=None):
-    """构造可验证表达（VP）：包裹 VC，按披露模式生成。零知识模式下不携带明文。"""
+def _normalize_paths(paths):
+    """把 disclose_fields 规范化为小写 (module, field) 元组集合。"""
+    out = set()
+    for p in (paths or []):
+        if not p:
+            continue
+        parts = str(p).split(".")
+        if len(parts) == 2:
+            out.add((parts[0].strip().lower(), parts[1].strip().lower()))
+    return out
+
+
+def _filter_selected(selected, allow):
+    """仅保留 allow 中的 'module.field' 路径，返回嵌套字典。"""
+    result = {}
+    for mod, modval in (selected or {}).items():
+        if not isinstance(modval, dict):
+            continue
+        m = mod.lower()
+        kept = {}
+        for fld, val in modval.items():
+            if (m, fld.lower()) in allow:
+                kept[fld] = val
+        if kept:
+            result[mod] = kept
+    return result
+
+
+def _strip_plaintext(vc):
+    """零知识模式：剔除明文 selected_data，仅保留承诺 + 证明。"""
+    ev = {k: val for k, val in vc.items() if k != "proof"}
+    esubj = {k: val for k, val in ev.get("credentialSubject", {}).items()
+             if k != "selected_data"}
+    return {**ev, "credentialSubject": esubj, "proof": vc.get("proof")}
+
+
+def construct_presentation(vc, modules=None, challenge=None, domain=None, disclose_fields=None):
+    """构造可验证表达（VP）：包裹 VC，按披露模式生成。
+    披露优先级：源 VC 为零知识(zk_proof) → 强制 zk_only（无明文）；
+    否则若指定 disclose_fields → selective（仅保留勾选字段明文）；
+    否则 full（全量明文）。"""
     if not vc or not isinstance(vc, dict) or not vc.get("credentialSubject"):
         return {"error": "无效的 VC 数据", "id": "vp:error",
                 "type": ["VerifiablePresentation"], "holder": "",
@@ -270,17 +323,25 @@ def construct_presentation(vc, modules=None, challenge=None, domain=None):
 
     subject = vc.get("credentialSubject", {})
     holder = subject.get("id", "")
-    disclosure = "zk_only" if subject.get("zk_proof") else "full"
+    disclosed_fields = None
 
-    embedded_vc = vc
-    if disclosure == "zk_only":
-        # 真正最小披露：零知识 VP 剔除明文 selected_data，仅保留承诺 + Schnorr ZKP。
-        # 发行方签名域本就不含 selected_data，故剥离后签名依然有效。
+    if subject.get("zk_proof"):
+        # 源 VC 为零知识模式：明文从不进入 VC，VP 只能 zk_only
+        disclosure = "zk_only"
+        embedded_vc = _strip_plaintext(vc)
+    elif disclose_fields:
+        # 语义层选择性披露：保留勾选字段明文，剔除其余
+        allow = _normalize_paths(disclose_fields)
+        filtered = _filter_selected(subject.get("selected_data", {}), allow)
         ev = {k: val for k, val in vc.items() if k != "proof"}
-        esubj = {k: val for k, val in ev.get("credentialSubject", {}).items()
-                 if k != "selected_data"}
-        ev = {**ev, "credentialSubject": esubj, "proof": vc.get("proof")}
-        embedded_vc = ev
+        esubj = {k: val for k, val in subject.items() if k != "selected_data"}
+        esubj["selected_data"] = filtered
+        embedded_vc = {**ev, "credentialSubject": esubj, "proof": vc.get("proof")}
+        disclosure = "selective"
+        disclosed_fields = sorted({mod + "." + fld for mod, flds in filtered.items() for fld in flds})
+    else:
+        disclosure = "full"
+        embedded_vc = vc
 
     vp = {
         "@context": ["https://www.w3.org/2018/credentials/v1"],
@@ -289,6 +350,7 @@ def construct_presentation(vc, modules=None, challenge=None, domain=None):
         "holder": holder,
         "disclosure": disclosure,
         "modules": subject.get("modules", []),
+        "disclosed_fields": disclosed_fields,
         "created": datetime.now(timezone.utc).isoformat(),
         "verifiableCredential": [embedded_vc],
         "challenge": challenge,
@@ -307,7 +369,7 @@ def verify_presentation(vp):
     disc = vp.get("disclosure")
     vc_results = []
     for vc in vp.get("verifiableCredential", []):
-        vcr = verify_credential(vc)
+        vcr = verify_credential(vc, disclosure=disc)
         vc_results.append(vcr)
         if not vcr["valid"]:
             errors.append("VC 验证失败: " + "; ".join(vcr["errors"]))
@@ -319,6 +381,8 @@ def verify_presentation(vp):
             errors.append("VP 声明零知识但内嵌 VC 未含 ZK 证明")
         if disc == "full" and vcr.get("mode") != "full":
             errors.append("VP 声明全披露但内嵌 VC 含 ZK 证明")
+        if disc == "selective" and vcr.get("mode") != "selective":
+            errors.append("VP 声明选择性披露但内嵌 VC 未进入选择性模式")
 
     return {
         "valid": len(errors) == 0,
@@ -349,7 +413,7 @@ def get_issuer_info():
 
 
 def get_ca_directory():
-    """返回根 CA + 全部签发者证书目录（供前端"签发者目录"展示）。"""
+    """返回根 CA + 全部签发者证书目录 + 外部商业 CA 信任锚（供前端"签发者目录"展示）。"""
     root = ca_store.get_root()
     issuers = []
     for c in ca_store.list_issuers():
@@ -362,4 +426,5 @@ def get_ca_directory():
             "revoked_at": c.get("revoked_at"), "revoke_reason": c.get("revoke_reason"),
             "public_key_x": c["public_key_x"], "public_key_y": c["public_key_y"],
         })
-    return {"root": root, "issuers": issuers}
+    return {"root": root, "issuers": issuers,
+            "external_cas": ca_store.list_external_cas()}

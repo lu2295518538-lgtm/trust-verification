@@ -13,6 +13,7 @@
 """
 import json
 import os
+import hashlib
 from datetime import datetime, timezone, timedelta
 
 from .sm2_sign import generate_keypair, sign_string, verify as sm2_verify
@@ -41,6 +42,14 @@ def _utcnow():
 
 def _iso(dt):
     return dt.isoformat()
+
+
+def _fp(pub_x, pub_y):
+    """外部 CA 根公钥指纹（用于界面展示，不暴露完整公钥）。"""
+    try:
+        return hashlib.sha256((str(pub_x) + str(pub_y)).encode()).hexdigest()[:16]
+    except Exception:
+        return ""
 
 
 def _load_store():
@@ -104,6 +113,7 @@ class CAStore:
                 "private_key": root["private_key"],
             },
             "issuers": issuers,
+            "external_cas": [],
         }
 
     @staticmethod
@@ -132,8 +142,9 @@ class CAStore:
     def list_issuers(self):
         return list(self._store["issuers"].values())
 
-    def trusted_issuer_dids(self):
-        """当前可信任的签发者 DID 列表（已注册 + 有效 + 未吊销 + 在有效期内）。"""
+    def trusted_issuer_dids(self, with_external=False):
+        """当前可信任的签发者 DID 列表（已注册 + 有效 + 未吊销 + 在有效期内）。
+        with_external=True 时，一并纳入处于 active 状态的外部商业 CA 授信的签发者。"""
         now = _utcnow()
         out = []
         for c in self._store["issuers"].values():
@@ -145,6 +156,10 @@ class CAStore:
             except Exception:
                 pass
             out.append(c["subject"]["did"])
+        if with_external:
+            for ca in self._store.get("external_cas", []):
+                if ca.get("status") == "active":
+                    out.extend(ca.get("members", []))
         return out
 
     # ---------- 吊销 / 恢复 ----------
@@ -168,39 +183,96 @@ class CAStore:
         _save_store(self._store)
         return True
 
+    # ---------- 外部商业 CA 信任锚（联邦） ----------
+    def external_ca_for_issuer(self, did):
+        """返回当前 active 且把 did 列入 members 的外部商业 CA（无则 None）。"""
+        for ca in self._store.get("external_cas", []):
+            if ca.get("status") == "active" and did in (ca.get("members") or []):
+                return ca
+        return None
+
+    def list_external_cas(self):
+        """列出全部外部商业 CA 信任锚（含根密钥指纹，不含私钥）。"""
+        out = []
+        for ca in self._store.get("external_cas", []):
+            out.append({
+                "id": ca.get("id"), "name": ca.get("name"),
+                "did_namespace": ca.get("did_namespace", ""),
+                "status": ca.get("status"),
+                "members": list(ca.get("members", [])),
+                "added_at": ca.get("added_at"),
+                "note": ca.get("note", ""),
+                "root_key_fingerprint": _fp(ca.get("root_public_key_x"), ca.get("root_public_key_y")),
+            })
+        return out
+
+    def add_external_ca(self, name, root_public_key_x, root_public_key_y,
+                        members, note="", did_namespace=""):
+        """登记一个新的外部商业 CA 信任锚（活跃状态）。返回所创建的条目。"""
+        ca_id = "ext-" + hashlib.md5((name + _iso(_utcnow())).encode()).hexdigest()[:12]
+        entry = {
+            "id": ca_id, "name": name, "did_namespace": did_namespace,
+            "root_public_key_x": root_public_key_x, "root_public_key_y": root_public_key_y,
+            "status": "active", "members": list(members or []),
+            "added_at": _iso(_utcnow()), "note": note,
+        }
+        self._store.setdefault("external_cas", []).append(entry)
+        _save_store(self._store)
+        return entry
+
+    def set_external_ca_status(self, ca_id, status):
+        """启用 / 停用某个外部 CA 信任锚。"""
+        for ca in self._store.get("external_cas", []):
+            if ca.get("id") == ca_id:
+                ca["status"] = status
+                _save_store(self._store)
+                return True
+        return False
+
     # ---------- 验证签发者 ----------
     def verify_issuer(self, did, pub_x=None, pub_y=None):
         """校验某签发者是否可信。
 
-        返回 {trusted, status, reason, cert?}
-            status: valid | revoked | expired | unknown | tampered | bad_cert
+        返回 {trusted, status, reason, cert?, external_ca?}
+            status: valid | external | revoked | expired | unknown | tampered | bad_cert
+            external_ca: 若该签发者由某个 active 外部商业 CA 授信，则为该 CA 名称，否则 None
         """
         cert = self._store["issuers"].get(did)
+        ext = self.external_ca_for_issuer(did)
+        ext_name = ext["name"] if ext else None
+
         if not cert:
+            # 本信任锚未直接注册，但若有活跃外部 CA 授信，则视为外部可信
+            if ext:
+                return {"trusted": True, "status": "external",
+                        "reason": "签发者由外部商业 CA「%s」授信（本信任锚未直接注册）" % ext_name,
+                        "cert": None, "external_ca": ext_name}
             return {"trusted": False, "status": "unknown",
-                    "reason": "签发者不在信任锚（未注册）", "cert": None}
+                    "reason": "签发者不在信任锚（未注册）", "cert": None, "external_ca": None}
+
         # 公钥一致性（防篡改：VC 里嵌的公钥必须与注册表一致）
         if pub_x is not None and pub_y is not None:
             if pub_x != cert["public_key_x"] or pub_y != cert["public_key_y"]:
                 return {"trusted": False, "status": "tampered",
-                        "reason": "VC 内嵌公钥与注册表不符（疑似伪造）", "cert": cert}
+                        "reason": "VC 内嵌公钥与注册表不符（疑似伪造）", "cert": cert,
+                        "external_ca": ext_name}
         # 吊销
         if cert["status"] == "revoked":
             return {"trusted": False, "status": "revoked",
                     "reason": "签发者证书已被吊销：" + (cert.get("revoke_reason") or ""),
-                    "cert": cert}
+                    "cert": cert, "external_ca": ext_name}
         # 有效期
         now = _utcnow()
         try:
             if _utcnow().fromisoformat(cert["not_before"]) > now:
                 return {"trusted": False, "status": "expired",
-                        "reason": "签发者证书尚未生效", "cert": cert}
+                        "reason": "签发者证书尚未生效", "cert": cert, "external_ca": ext_name}
             if _utcnow().fromisoformat(cert["not_after"]) < now:
                 return {"trusted": False, "status": "expired",
-                        "reason": "签发者证书已过期", "cert": cert}
+                        "reason": "签发者证书已过期", "cert": cert, "external_ca": ext_name}
         except Exception:
             return {"trusted": False, "status": "bad_cert",
-                    "reason": "证书有效期格式异常", "cert": cert}
+                    "reason": "证书有效期格式异常", "cert": cert, "external_ca": ext_name}
         # 证书签名（根 CA 验签）
         try:
             sig = cert.get("signature", "")
@@ -208,12 +280,15 @@ class CAStore:
                               self._store["root"]["public_key_x"],
                               self._store["root"]["public_key_y"]):
                 return {"trusted": False, "status": "bad_cert",
-                        "reason": "证书根 CA 签名无效", "cert": cert}
+                        "reason": "证书根 CA 签名无效", "cert": cert, "external_ca": ext_name}
         except Exception:
             return {"trusted": False, "status": "bad_cert",
-                    "reason": "证书验签异常", "cert": cert}
-        return {"trusted": True, "status": "valid",
-                "reason": "签发者证书有效且在信任锚内", "cert": cert}
+                    "reason": "证书验签异常", "cert": cert, "external_ca": ext_name}
+        reason = "签发者证书有效且在信任锚内"
+        if ext_name:
+            reason += "；并由外部商业 CA「%s」额外授信" % ext_name
+        return {"trusted": True, "status": "valid", "reason": reason,
+                "cert": cert, "external_ca": ext_name}
 
 
 # 全局单例

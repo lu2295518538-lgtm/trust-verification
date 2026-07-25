@@ -328,6 +328,17 @@ body {
 .trace-badge.ok { background: var(--primary-soft); color: var(--primary-2); }
 .trace-badge.gap { background: #fff4e5; color: #b25e09; }
 .trace-badge.fail { background: #fdecec; color: #e5484d; }
+.stage-line { position: relative; }
+.stage-line.timeout { background: #e5484d; }
+.stage-gap { position: absolute; top: -15px; left: 50%; transform: translateX(-50%); font-size: .58rem; color: var(--ink-3); white-space: nowrap; background: var(--surface); padding: 0 3px; }
+.stage-ts { display: block; font-size: .6rem; color: var(--ink-3); margin: 3px 0 0 8px; white-space: nowrap; }
+.risk-panel { margin: 14px 0; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); }
+.risk-title { font-size: .82rem; font-weight: 700; color: var(--ink-2); margin-bottom: 8px; letter-spacing: .04em; }
+.risk-item { font-size: .86rem; padding: 7px 10px; border-radius: 9px; margin: 6px 0; line-height: 1.45; }
+.risk-item.ok { background: rgba(47,208,122,.12); color: #1f9d57; border: 1px solid rgba(47,208,122,.4); }
+.risk-item.high { background: #fdecec; color: #e5484d; border: 1px solid rgba(229,72,77,.4); }
+.risk-item.med { background: #fff4e5; color: #b25e09; border: 1px solid rgba(234,179,8,.45); }
+.risk-item.low { background: var(--surface); color: var(--ink-3); border: 1px solid var(--line-2); }
 .trace-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 14px; }
 .trace-card { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; background: var(--surface); }
 .trace-card .tc-type { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--primary); }
@@ -1141,6 +1152,21 @@ body {
 .ca-badge.warn { background: rgba(176,122,0,.14); color: #9a6b00; }
 .btn-xs { padding: 4px 10px; font-size: .76rem; }
 @media (max-width: 780px) { .ca-grid { grid-template-columns: 1fr; } }
+.ca-badge.ext { background: rgba(37,99,235,.12); color: #1d4ed8; border: 1px solid rgba(37,99,235,.35); }
+.ext-ca-wrap { margin-top: 22px; border-top: 1px dashed #d8e0d8; padding-top: 18px; }
+.ext-ca-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.ext-ca-head h3 { margin: 0; font-size: 1rem; color: #16241c; }
+.ext-ca-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.ext-ca-card { background: #fff; border: 1px solid #d8e0d8; border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+.ext-ca-card.disabled { border-style: dashed; opacity: .68; }
+.ext-ca-sub { font-size: .78rem; color: #6b7a72; word-break: break-all; }
+.ext-ca-members { font-size: .78rem; color: #51615a; }
+.ext-ca-fp { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .74rem; color: #6b7a72; }
+.ext-ca-form { background: #f6f9f6; border: 1px solid #e3e8e3; border-radius: 14px; padding: 14px; margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.ext-ca-form label { font-size: .78rem; color: #51615a; }
+.ext-ca-form input, .ext-ca-form textarea { width: 100%; padding: 8px 10px; border: 1px solid #cdd6cd; border-radius: 9px; font-size: .85rem; font-family: inherit; }
+.ext-ca-form textarea { resize: vertical; min-height: 54px; }
+@media (max-width: 780px) { .ext-ca-grid { grid-template-columns: 1fr; } }
 
 .trace-badge.warn{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.5);color:#a16207}
 .tc-party{margin-top:6px;font-size:12px;padding:3px 8px;border-radius:6px;display:inline-block}
@@ -1276,6 +1302,15 @@ inspector: 张XX</textarea>
           <label class="field-label" for="vp-domain">验证方域名 Domain</label>
           <input class="input" id="vp-domain" value="inspector.gov.cn" placeholder="凭证使用场景域名">
         </div>
+        <div class="field">
+          <label class="field-label">VP 披露模式</label>
+          <div class="claim-check" id="vp-mode-box">
+            <label><input type="radio" name="vp-mode" value="full" checked onchange="onVpModeChange()"> 全披露（携带全部明文）</label>
+            <label><input type="radio" name="vp-mode" value="selective" onchange="onVpModeChange()"> 选择性披露（仅展示勾选字段）</label>
+          </div>
+          <div class="vc-hint" id="vp-zk-note" style="display:none;color:#b45309;margin-top:4px;">源 VC 为零知识模式，VP 自动为零知识（不含任何明文），无需选择字段。</div>
+          <div class="claim-check" id="vp-claims" style="display:none;margin-top:6px;"></div>
+        </div>
         <div class="btn-row">
           <button class="btn btn-primary btn-sm" id="vp-build-btn" onclick="buildVP()">生成 VP</button>
           <button class="btn btn-outline btn-sm" onclick="verifyVP()">验证 VP</button>
@@ -1300,6 +1335,30 @@ inspector: 张XX</textarea>
     <div class="ca-root" id="ca-root"></div>
     <div class="ca-grid" id="ca-grid"></div>
     <p class="ca-note">演示：吊销某签发者后，回到「VC·VP」重新验证其签发的 VC/VP，将显示「签发者证书已被吊销」。吊销可逆，可随时「恢复」。</p>
+
+    <div class="ext-ca-wrap" id="ext-ca-wrap">
+      <div class="ext-ca-head">
+        <h3>外部商业 CA 信任锚（联邦）</h3>
+        <button class="btn btn-xs" onclick="toggleExtCaForm()">+ 登记外部 CA</button>
+      </div>
+      <div class="ext-ca-grid" id="ext-ca-grid"></div>
+      <div class="ext-ca-form" id="ext-ca-form" style="display:none">
+        <label>外部 CA 名称 *</label>
+        <input id="ext-ca-name" placeholder="如 国家企业信用信息商业认证（示例）">
+        <label>根公钥 X（hex）*</label>
+        <input id="ext-ca-x" placeholder="外部 CA 根 SM2 公钥 X 坐标">
+        <label>根公钥 Y（hex）*</label>
+        <input id="ext-ca-y" placeholder="外部 CA 根 SM2 公钥 Y 坐标">
+        <label>DID 命名空间（可选）</label>
+        <input id="ext-ca-ns" placeholder="如 did:commercialca:">
+        <label>授信签发者 DID（逗号分隔，可选）</label>
+        <textarea id="ext-ca-members" placeholder="did:trust:livestock:issuer:vet_station_a, did:…（该外部 CA 为其背书的签发者）"></textarea>
+        <label>备注（可选）</label>
+        <input id="ext-ca-note" placeholder="如 对接某商业认证机构">
+        <button class="btn" onclick="addExternalCA()">登记信任锚</button>
+      </div>
+      <p class="ca-note">外部商业 CA 作为额外信任锚：其「成员」列表中的签发者，即使本信任锚未直接注册，验证时也会被认可为<strong>外部授信</strong>（状态 external）。停用后授信立即失效。外部 CA 根密钥仅展示指纹，不进入签名域。</p>
+    </div>
   </div>
 
 <div id="toast" class="toast" style="display:none;"></div>
@@ -1406,6 +1465,7 @@ async function init() {
   try { initSidebarNav(); } catch (e) { console.error('Sidebar:', e); }
   try { loadParties(); } catch (e) { console.error('Parties:', e);   try { loadIssuers(); } catch (e) { console.error('Issuers:', e); } }
   try { renderCADirectory(); } catch (e) { console.error('CADir:', e); }
+  try { loadExternalCAs(); } catch (e) { console.error('ExtCA:', e); }
   try { renderIssuerInfo(); } catch (e) { console.error('IssuerInfo:', e); }
 }
 
@@ -1561,6 +1621,7 @@ async function buildVC() {
     if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
     const vc = await r.json();
     currentVC = vc;
+    _renderVpClaims(vc);
     const box = document.getElementById('vc-output');
     box.style.display = 'block'; box.innerHTML = syntaxHL(vc);
     await renderIssuerInfo();
@@ -1572,6 +1633,47 @@ async function buildVC() {
   } finally { btn.disabled = false; btn.textContent = '生成 VC'; }
 }
 
+function _renderVpClaims(vc) {
+  const subj = (vc && vc.credentialSubject) || {};
+  const claimsBox = document.getElementById('vp-claims');
+  const modeBox = document.getElementById('vp-mode-box');
+  const zkNote = document.getElementById('vp-zk-note');
+  if (!claimsBox) return;
+  if (subj.zk_proof) {
+    if (modeBox) modeBox.style.display = 'none';
+    if (zkNote) zkNote.style.display = 'block';
+    claimsBox.style.display = 'none';
+    claimsBox.innerHTML = '';
+    return;
+  }
+  if (modeBox) modeBox.style.display = 'block';
+  if (zkNote) zkNote.style.display = 'none';
+  const sd = subj.selected_data || {};
+  const groups = [['basic', '基础信息'], ['ownership', '权属'], ['content', '内容']];
+  let html = '';
+  groups.forEach(function (g) {
+    const mod = g[0], label = g[1];
+    const fields = sd[mod];
+    if (!fields || typeof fields !== 'object') return;
+    html += '<div style="margin:4px 0;"><b>' + esc(label) + '</b><br>';
+    Object.keys(fields).forEach(function (f) {
+      const path = mod + '.' + f;
+      html += '<label style="margin-right:10px;display:inline-block;"><input type="checkbox" value="' + esc(path) + '" checked> ' + esc(f) + '</label>';
+    });
+    html += '</div>';
+  });
+  claimsBox.innerHTML = html;
+  const fullRadio = document.querySelector('input[name=vp-mode][value=full]');
+  if (fullRadio) fullRadio.checked = true;
+  onVpModeChange();
+}
+
+function onVpModeChange() {
+  const mode = (document.querySelector('input[name=vp-mode]:checked') || {}).value || 'full';
+  const claims = document.getElementById('vp-claims');
+  if (claims) claims.style.display = (mode === 'selective') ? 'block' : 'none';
+}
+
 async function buildVP() {
   if (!currentVC) { showToast('请先生成 VC', 'err'); return; }
   const challenge = (document.getElementById('vp-challenge').value || '').trim() || ('nonce-' + Math.random().toString(16).slice(2, 10));
@@ -1579,16 +1681,31 @@ async function buildVP() {
   const btn = document.getElementById('vp-build-btn');
   btn.disabled = true; btn.textContent = '构造中…';
   try {
-    const r = await securePost('/api/vp/construct', { vc: currentVC, challenge: challenge, domain: domain });
+    const body = { vc: currentVC, challenge: challenge, domain: domain };
+    const mode = (document.querySelector('input[name=vp-mode]:checked') || {}).value || 'full';
+    if (mode === 'selective') {
+      const checked = Array.prototype.slice.call(document.querySelectorAll('#vp-claims input[type=checkbox]:checked')).map(function (i) { return i.value; });
+      body.disclose_fields = checked;
+    }
+    const r = await securePost('/api/vp/construct', body);
     if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
     const vp = await r.json();
     currentVP = vp;
     const box = document.getElementById('vp-output');
     const _emb = (vp.verifiableCredential && vp.verifiableCredential[0] && vp.verifiableCredential[0].credentialSubject) || {};
     const _leaks = ('selected_data' in _emb);
-    box.style.display = 'block'; box.innerHTML = '<div class="vc-badge ' + (_leaks ? 'no' : 'yes') + '" style="display:inline-block;margin:0 0 8px 0">' + (_leaks ? '⛔ 全披露：VP 含明文数据' : '🔒 零知识最小披露：VP 不含任何明文') + '</div>' + syntaxHL(vp);
-    const disc = (vp.disclosure === 'zk_only') ? '零知识（不泄露明文）' : '全披露';
-    showToast('VP 已构造（披露模式：' + disc + '）', 'ok');
+    let badge;
+    if (vp.disclosure === 'zk_only') {
+      badge = '<div class="vc-badge yes" style="display:inline-block;margin:0 0 8px 0">🔒 零知识最小披露：VP 不含任何明文</div>';
+    } else if (vp.disclosure === 'selective') {
+      const n = (vp.disclosed_fields || []).length;
+      badge = '<div class="vc-badge partial" style="display:inline-block;margin:0 0 8px 0">⚠ 选择性披露：仅展示 ' + n + ' 个字段（其余不泄露）</div>';
+    } else {
+      badge = '<div class="vc-badge no" style="display:inline-block;margin:0 0 8px 0">⛔ 全披露：VP 含全部明文数据</div>';
+    }
+    box.style.display = 'block'; box.innerHTML = badge + syntaxHL(vp);
+    const discLabel = (vp.disclosure === 'zk_only') ? '零知识（不泄露明文）' : (vp.disclosure === 'selective' ? ('选择性披露（' + (vp.disclosed_fields || []).length + ' 字段）') : '全披露');
+    showToast('VP 已构造（披露模式：' + discLabel + '）', 'ok');
   } catch (e) {
     showToast('VP 构造失败：' + (e.message || e), 'err');
   } finally { btn.disabled = false; btn.textContent = '生成 VP'; }
@@ -1646,8 +1763,9 @@ async function verifyVC() {
     if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
     const res = await r.json();
     const parts = [];
-    parts.push(issuerBadge(res.issuer_status, res.issuer_trusted));
+    parts.push(issuerBadge(res.issuer_status, res.issuer_trusted, res.issuer_external_ca));
     parts.push('签发者：' + (res.issuer_name || res.issuer || ''));
+    if (res.issuer_external_ca && res.issuer_status === 'valid') parts.push('（额外由外部商业 CA「' + esc(res.issuer_external_ca) + '」背书）');
     parts.push('权属人：' + (res.owner_name || res.owner || ''));
     parts.push('承诺校验：' + (res.commitment_valid ? '通过' : '失败'));
     parts.push('模式：' + (res.mode === 'zk_only' ? '零知识' : '全披露'));
@@ -1664,17 +1782,19 @@ async function verifyVP() {
     const res = await r.json();
     const parts = [];
     parts.push('权属验证：' + (res.valid ? '通过' : '失败'));
-    if (res.mode) parts.push('模式：' + (res.mode === 'zk_only' ? '零知识' : '全披露'));
+    if (res.mode) parts.push('模式：' + (res.mode === 'zk_only' ? '零知识' : (res.mode === 'selective' ? '选择性披露' : '全披露')));
     if (res.did) parts.push('持有者：' + res.did);
     if (res.modules && res.modules.length) parts.push('披露模块：' + res.modules.join('/'));
-    if (res.issuer_status) parts.push(issuerBadge(res.issuer_status, res.issuer_trusted));
+    if (res.issuer_status) parts.push(issuerBadge(res.issuer_status, res.issuer_trusted, res.issuer_external_ca));
+    if (res.issuer_external_ca && res.issuer_status === 'valid') parts.push('（额外由外部商业 CA「' + esc(res.issuer_external_ca) + '」背书）');
     if (res.errors && res.errors.length) parts.push('错误：' + res.errors.join('；'));
     showVerifyResult('vp-verify-output', res.valid, parts.join('　'));
   } catch (e) { showToast('VP 验证失败：' + (e.message || e), 'err'); }
 }
 
-function issuerBadge(status, trusted) {
+function issuerBadge(status, trusted, externalCa) {
   if (status === 'valid' && trusted) return '<span class="ca-badge ok">✓ 签发者可信（证书有效）</span>';
+  if (status === 'external') return '<span class="ca-badge ext">🔗 外部商业 CA 授信：' + esc(externalCa || '') + '</span>';
   if (status === 'revoked') return '<span class="ca-badge bad">✗ 签发者证书已吊销</span>';
   if (status === 'expired') return '<span class="ca-badge warn">⚠ 签发者证书已过期</span>';
   if (status === 'tampered') return '<span class="ca-badge bad">✗ 公钥不符（疑似伪造）</span>';
@@ -1733,6 +1853,85 @@ async function restoreIssuer(did) {
     showToast('已恢复：' + did, 'ok');
     renderCADirectory();
   } catch (e) { showToast('恢复失败：' + (e.message || e), 'err'); }
+}
+
+async function loadExternalCAs() {
+  const grid = document.getElementById('ext-ca-grid');
+  if (!grid) return;
+  try {
+    const r = await fetch('/api/external-cas', { headers: { 'X-API-Key': getApiKey() } });
+    const j = await r.json();
+    const list = (j.external_cas || []);
+    if (!list.length) { grid.innerHTML = '<div class="ca-note">尚未登记任何外部商业 CA 信任锚。点击右上「+ 登记外部 CA」添加一个示例。</div>'; return; }
+    grid.innerHTML = list.map(function (ca) {
+      const disabled = ca.status !== 'active';
+      const members = (ca.members || []).map(function (m) { return esc(m); }).join('<br>') || '（无）';
+      return '<div class="ext-ca-card' + (disabled ? ' disabled' : '') + '">'
+        + '<div class="ca-card-head"><span class="ca-card-name">' + esc(ca.name) + '</span>'
+        + (disabled ? '<span class="ca-badge warn">已停用</span>' : '<span class="ca-badge ok">活跃</span>') + '</div>'
+        + '<div class="ext-ca-sub">命名空间：' + (ca.did_namespace ? esc(ca.did_namespace) : '—') + '</div>'
+        + '<div class="ext-ca-fp">根密钥指纹：' + esc(ca.root_key_fingerprint || '') + '</div>'
+        + '<div class="ext-ca-members">授信签发者：<br>' + members + '</div>'
+        + '<div class="ca-card-foot">'
+        + (disabled
+            ? '<button class="btn btn-xs" onclick="enableExternalCA(\'' + esc(ca.id) + '\')">启用</button>'
+            : '<button class="btn btn-xs" onclick="disableExternalCA(\'' + esc(ca.id) + '\')">停用</button>')
+        + '</div></div>';
+    }).join('');
+  } catch (e) { grid.innerHTML = '<div class="ca-note">外部 CA 加载失败</div>'; }
+}
+
+function toggleExtCaForm() {
+  const f = document.getElementById('ext-ca-form');
+  if (f) f.style.display = (f.style.display === 'none') ? 'block' : 'none';
+}
+
+async function addExternalCA() {
+  const name = (document.getElementById('ext-ca-name').value || '').trim();
+  const x = (document.getElementById('ext-ca-x').value || '').trim();
+  const y = (document.getElementById('ext-ca-y').value || '').trim();
+  const ns = (document.getElementById('ext-ca-ns').value || '').trim();
+  const members = (document.getElementById('ext-ca-members').value || '').split(/[,，\n]/).map(function (s) { return s.trim(); }).filter(Boolean);
+  const note = (document.getElementById('ext-ca-note').value || '').trim();
+  if (!name) { showToast('请填写外部 CA 名称', 'err'); return; }
+  if (!x || !y) { showToast('请填写根公钥 X / Y', 'err'); return; }
+  try {
+    const tok = await (await fetch('/api/csrf-token')).json();
+    const r = await fetch('/api/external-cas', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey(), 'X-CSRF-Token': tok.csrf_token },
+      body: JSON.stringify({ name: name, root_public_key_x: x, root_public_key_y: y, did_namespace: ns, members: members, note: note })
+    });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+    showToast('已登记外部 CA：' + name, 'ok');
+    const f = document.getElementById('ext-ca-form'); if (f) f.style.display = 'none';
+    loadExternalCAs();
+  } catch (e) { showToast('登记失败：' + (e.message || e), 'err'); }
+}
+
+async function disableExternalCA(id) {
+  try {
+    const tok = await (await fetch('/api/csrf-token')).json();
+    const r = await fetch('/api/external-cas/' + encodeURIComponent(id) + '/disable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey(), 'X-CSRF-Token': tok.csrf_token }
+    });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+    showToast('已停用外部 CA', 'ok'); loadExternalCAs();
+  } catch (e) { showToast('停用失败：' + (e.message || e), 'err'); }
+}
+
+async function enableExternalCA(id) {
+  try {
+    const tok = await (await fetch('/api/csrf-token')).json();
+    const r = await fetch('/api/external-cas/' + encodeURIComponent(id) + '/enable', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey(), 'X-CSRF-Token': tok.csrf_token }
+    });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+    showToast('已启用外部 CA', 'ok'); loadExternalCAs();
+  } catch (e) { showToast('启用失败：' + (e.message || e), 'err'); }
 }
 
 function showVerifyResult(id, ok, detail) {
@@ -2715,10 +2914,25 @@ function renderTrace(d) {
   }
   const typeLabel = { quarantine: '检疫记录', transaction: '交易记录', transport: '运输记录', slaughter: '屠宰记录', '通用': '通用记录' };
   const sym = { done: '✓', blocked: '!', required: '!', missing: '·' };
+  function fmtTs(ts){ if(!ts) return ''; return String(ts).replace('T', ' ').substring(0, 16); }
+  function fmtGap(a, b){
+    if(!a || !b) return '';
+    var da = Date.parse(a), db2 = Date.parse(b);
+    if(isNaN(da) || isNaN(db2)) return '';
+    var h = Math.abs(db2 - da) / 3600000;
+    if(h < 1) return Math.round(h*60) + 'm';
+    if(h < 48) return Math.round(h) + 'h';
+    return (h/24).toFixed(1) + 'd';
+  }
   let flow = '<div class="stage-flow">';
   d.stages.forEach(function (s, i) {
-    flow += '<div class="stage-node ' + s.status + '"><div class="stage-dot">' + (sym[s.status] || '·') + '</div><div class="stage-label">' + esc(s.label) + '</div></div>';
-    if (i < d.stages.length - 1) flow += '<div class="stage-line ' + (s.status === 'done' ? 'filled' : '') + '"></div>';
+    const tsHtml = s.ts ? '<span class="stage-ts">' + esc(fmtTs(s.ts)) + '</span>' : '';
+    flow += '<div class="stage-node ' + s.status + (s.timeout ? ' timeout' : '') + '"><div class="stage-dot">' + (sym[s.status] || '·') + '</div><div class="stage-label">' + esc(s.label) + tsHtml + '</div></div>';
+    if (i < d.stages.length - 1) {
+      const nx = d.stages[i + 1];
+      const gap = fmtGap(s.ts, nx.ts);
+      flow += '<div class="stage-line ' + (s.status === 'done' ? 'filled' : '') + (s.timeout ? ' timeout' : '') + '"><span class="stage-gap">' + gap + '</span></div>';
+    }
   });
   flow += '</div>';
 
@@ -2726,6 +2940,20 @@ function renderTrace(d) {
   if (d.summary.complete) badge = '<div class="trace-badge ok">● 链路完整：申报 → 出证 → 交易 → 运输 → 屠宰 全环节可追溯</div>';
   else if (d.summary.quarantine_ok === false) badge = '<div class="trace-badge fail">● 检疫未通过：该批次不得进入流通，需无害化处理</div>';
   else badge = '<div class="trace-badge gap">● 链路存在缺口：灰显阶段尚未存证</div>';
+
+  let riskHtml = '<div class="risk-panel">';
+  const risks = (d.summary && d.summary.risks) || [];
+  if (!risks.length) {
+    riskHtml += '<div class="risk-item ok">✓ 未检出风险：全链路合规</div>';
+  } else {
+    riskHtml += '<div class="risk-title">风险预警</div>';
+    risks.forEach(function (rk) {
+      const cls = rk.level === 'high' ? 'high' : (rk.level === 'medium' ? 'med' : 'low');
+      const icon = rk.level === 'high' ? '⛔ ' : (rk.level === 'medium' ? '⚠ ' : '• ');
+      riskHtml += '<div class="risk-item ' + cls + '">' + icon + esc(rk.msg) + '</div>';
+    });
+  }
+  riskHtml += '</div>';
 
   let cards = '<div class="trace-cards">';
   (d.linked || []).forEach(function (r) {
@@ -2748,7 +2976,7 @@ function renderTrace(d) {
   if (d.summary.unregistered_parties && d.summary.unregistered_parties.length) {
     unreg = '<div class="trace-badge warn">● 链路含 ' + d.summary.unregistered_parties.length + ' 条未登记主体存证：可信度待核实</div>';
   }
-  box.innerHTML = flow + unreg + badge + cards;
+  box.innerHTML = flow + unreg + badge + riskHtml + cards;
 }
 
 const SAMPLE_DATA = {
