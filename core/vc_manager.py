@@ -57,6 +57,17 @@ issuer_registry.register(
 )
 
 
+def _signable_json(vc):
+    """生成用于 SM2 签名的规范化字节：剔除 proof，并剔除 credentialSubject.selected_data
+    （明文披露载荷不进入签名域，以便零知识 VP 可剥离明文而不失效——真正最小披露）。"""
+    v = {k: val for k, val in vc.items() if k != "proof"}
+    subj = v.get("credentialSubject")
+    if isinstance(subj, dict) and "selected_data" in subj:
+        subj = {k: val for k, val in subj.items() if k != "selected_data"}
+        v = {**v, "credentialSubject": subj}
+    return canonical_json(v)
+
+
 def request_credential(metadata, holder_did, issuer_did=None, issuer_name=None,
                        modules=None, use_zk=False, validity_days=365):
     """
@@ -133,7 +144,9 @@ def request_credential(metadata, holder_did, issuer_did=None, issuer_name=None,
         "credentialSubject": subject,
         "expirationDate": expiration,
     }
-    vc_json = canonical_json(vc)
+    # 仅对"不含明文的承诺绑定结构"签名：selected_data 作为可剥离的披露载荷，
+    # 不进入签名域——零知识 VP 可剔除明文而不破坏发行方签名（真正最小披露）。
+    vc_json = _signable_json(vc)
     sig = sign_string(vc_json, _sign_priv)
     vc["proof"] = {
         "type": "SM2Signature2024", "created": issuance,
@@ -160,8 +173,7 @@ def verify_credential(vc):
     if not pub_x or not pub_y or not proof_value:
         errors.append("proof 不完整")
     else:
-        vc_unsigned = {k: v for k, v in vc.items() if k != "proof"}
-        vc_json = canonical_json(vc_unsigned)
+        vc_json = _signable_json(vc)  # 与签发时一致：剔除 proof 与明文 selected_data
         if not sm2_verify(vc_json.encode(), proof_value[:64], proof_value[64:], pub_x, pub_y):
             errors.append("发行方签名验证失败")
         _iss_did = vc.get("issuer", {}).get("id", "")
@@ -170,6 +182,7 @@ def verify_credential(vc):
         issuer_status = _trust["status"]
         if not issuer_trusted:
             errors.append("签发者不可信：" + _trust["reason"])
+        # vc_json 由 _signable_json 生成：与签发时一致，剔除 proof 与明文 selected_data
 
     # ---- ② 承诺 / ZK 校验 ----
     commitment_valid = False
@@ -259,6 +272,16 @@ def construct_presentation(vc, modules=None, challenge=None, domain=None):
     holder = subject.get("id", "")
     disclosure = "zk_only" if subject.get("zk_proof") else "full"
 
+    embedded_vc = vc
+    if disclosure == "zk_only":
+        # 真正最小披露：零知识 VP 剔除明文 selected_data，仅保留承诺 + Schnorr ZKP。
+        # 发行方签名域本就不含 selected_data，故剥离后签名依然有效。
+        ev = {k: val for k, val in vc.items() if k != "proof"}
+        esubj = {k: val for k, val in ev.get("credentialSubject", {}).items()
+                 if k != "selected_data"}
+        ev = {**ev, "credentialSubject": esubj, "proof": vc.get("proof")}
+        embedded_vc = ev
+
     vp = {
         "@context": ["https://www.w3.org/2018/credentials/v1"],
         "type": "VerifiablePresentation",
@@ -267,7 +290,7 @@ def construct_presentation(vc, modules=None, challenge=None, domain=None):
         "disclosure": disclosure,
         "modules": subject.get("modules", []),
         "created": datetime.now(timezone.utc).isoformat(),
-        "verifiableCredential": [vc],
+        "verifiableCredential": [embedded_vc],
         "challenge": challenge,
         "domain": domain,
     }

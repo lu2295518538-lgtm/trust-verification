@@ -1553,7 +1553,9 @@ async function buildVP() {
     const vp = await r.json();
     currentVP = vp;
     const box = document.getElementById('vp-output');
-    box.style.display = 'block'; box.innerHTML = syntaxHL(vp);
+    const _emb = (vp.verifiableCredential && vp.verifiableCredential[0] && vp.verifiableCredential[0].credentialSubject) || {};
+    const _leaks = ('selected_data' in _emb);
+    box.style.display = 'block'; box.innerHTML = '<div class="vc-badge ' + (_leaks ? 'no' : 'yes') + '" style="display:inline-block;margin:0 0 8px 0">' + (_leaks ? '⛔ 全披露：VP 含明文数据' : '🔒 零知识最小披露：VP 不含任何明文') + '</div>' + syntaxHL(vp);
     const disc = (vp.disclosure === 'zk_only') ? '零知识（不泄露明文）' : '全披露';
     showToast('VP 已构造（披露模式：' + disc + '）', 'ok');
   } catch (e) {
