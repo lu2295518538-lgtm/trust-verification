@@ -3542,16 +3542,16 @@ function extractRecordLabel(rec) {
       else if (biz['起运地']) route = '\u4ece ' + biz['起运地'];
       if (route) subText += (subText ? ' | ' : '') + route;
     } else if (type === 'quarantine') {
-      mainText = biz['检疫证号'] || biz['证书编号'] || biz['编号'] || '';
+      mainText = biz['检疫编号'] || biz['检疫证号'] || biz['证书编号'] || biz['编号'] || '';
       var qParts = [];
       if (biz['动物种类']) qParts.push(biz['动物种类']);
       if (biz['数量']) qParts.push(biz['数量'] + '头');
       if (qParts.length) subText = qParts.join(' · ');
     } else if (type === 'slaughter') {
-      mainText = biz['屠宰证号'] || biz['编号'] || '';
+      mainText = biz['屠宰编号'] || biz['屠宰证号'] || biz['编号'] || '';
       subText = biz['动物种类'] || '';
     } else if (type === 'transaction') {
-      mainText = biz['交易单号'] || biz['编号'] || '';
+      mainText = biz['交易编号'] || biz['交易单号'] || biz['编号'] || '';
       subText = biz['动物种类'] || '';
     } else if (type === 'declare') {
       mainText = biz['申报号'] || biz['编号'] || '';
