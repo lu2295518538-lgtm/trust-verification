@@ -213,9 +213,9 @@ def api_verify():
         if not modified:
             raw = raw + '\n[\u7be1\u6539\u8bb0\u5f55]'
 
-    # Compute fingerprint based on current (potentially modified) data
+    # Compute fingerprint: ALWAYS recompute SM3 from provided raw_data when present
     stored_fp = record.get('fingerprint','') if record else ''
-    if tampered and raw:
+    if raw:
         try:
             meta = extract_metadata(raw, record.get('data_type', 'general') if record else 'general')
             new_fp_r = generate_fingerprint(raw, meta)
@@ -223,6 +223,7 @@ def api_verify():
         except:
             fp_to_check = user_fp or stored_fp
     else:
+        # No raw_data supplied - cannot recompute, fall back (trivial pass)
         fp_to_check = user_fp or stored_fp
 
     C_to_check = user_C or (record.get('commitment','') if record else '')
@@ -540,9 +541,15 @@ def api_reveal():
     with get_db() as db: r = db.execute('SELECT * FROM commitments WHERE data_did=?',(d.get('data_did',''),)).fetchone()
     if not r: return jsonify({'success':False,'error':'not found'}),404
     item = {k:v for k,v in dict(r).items() if v is not None}
-    item['note'] = '承诺已揭示'
-    # alias for frontend which reads data.nonce
+    item['note'] = 'revealed'
     item['nonce'] = item.get('randomness', '')
+    try:
+        _fp = item.get('fingerprint', '')
+        _nonce = int(item.get('nonce', '') or 0)
+        _C = item.get('commitment', '')
+        item['commitment_valid'] = bool(verify_commitment(_fp, _nonce, _C))
+    except Exception:
+        item['commitment_valid'] = False
     return jsonify({'success':True, **item})
 
 @app.route('/api/watermark/embed', methods=['POST'])

@@ -378,8 +378,6 @@ body {
 .result .step-val.short { word-break: normal; }
 .result .step-val.muted { color: var(--ink-3); }
 
-
-
 /* WM mode tabs */
 .wm-mode-tabs { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 2px; background: oklch(0% 0 0 / 0.7); border-radius: 999px; padding: 3px; z-index: 15; }
 
@@ -740,6 +738,22 @@ body {
 }
 
 }
+
+  .selected-preview { margin: 14px 0; }
+  .reveal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; margin: 10px 0; }
+  @media (max-width: 520px) { .reveal-grid { grid-template-columns: 1fr; } }
+  .reveal-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--t-small); padding: 3px 0; border-bottom: 1px dashed var(--line); }
+  .reveal-row .rk { color: var(--ink-3); }
+  .reveal-row .rv { color: var(--ink); font-family: 'JetBrains Mono', monospace; word-break: break-all; text-align: right; }
+  .reveal-proof { margin: 10px 0; padding: 8px 12px; border-radius: 8px; font-size: var(--t-small); font-weight: 600; }
+  .reveal-proof.ok { background: var(--success-soft); color: var(--success); border: 1px solid var(--success); }
+  .reveal-proof.bad { background: var(--danger-soft); color: var(--danger); border: 1px solid var(--danger); }
+  .reveal-biz { margin: 10px 0; padding: 10px 12px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 8px; }
+  .reveal-biz .rl, .reveal-raw .rl { font-size: var(--t-micro); color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 6px; }
+  .reveal-biz-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--t-small); padding: 2px 0; }
+  .reveal-biz-row .vd-val { color: var(--ink); word-break: break-all; text-align: right; }
+  .reveal-raw { margin-top: 10px; }
+  .reveal-raw pre { margin: 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font-family: 'JetBrains Mono', monospace; font-size: var(--t-micro); white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow: auto; }
 </style>
 </head>
 <body>
@@ -780,10 +794,6 @@ body {
 
   <!-- ─── Main content ─── -->
   <div class="main-content">
-
-
-
-
 
 <!-- ─── Top bar ─── -->
 <div class="topbar">
@@ -919,6 +929,8 @@ body {
         模拟篡改验证
       </button>
     </div>
+
+    <div class="result" id="selected-preview" style="display:none;"></div>
 
     <div class="result" id="verify-result" style="display:none;"></div>
   </div>
@@ -1416,7 +1428,6 @@ inspector: 张XX</textarea>
     </div>
   </div>
 
-
   <!-- Section: 签发者目录 (CA) -->
   <div class="section" id="sec-ca">
     <div class="section-head">
@@ -1474,6 +1485,7 @@ var txt=document.getElementById("chain-status-text");
 if(txt)txt.textContent="JS OK";if(dot)dot.className="status-dot ok";
 }catch(e){console.error(e)}})();
 let currentDataDID = null;
+let selectedRawData = null;
 let wmOriginalImage = null;
 let wmWatermarkedImage = null;
 
@@ -1646,7 +1658,6 @@ function onVCSampleChange() {
 }
 
 const dataTypeMap = { quarantine: '检疫数据', transaction: '交易数据', transport: '运输数据', slaughter: '屠宰数据' };
-
 
 function esc(s) {
   if (!s) return '';
@@ -1847,6 +1858,7 @@ async function renderIssuerInfo() {
 async function loadIssuers() {
   const sel = document.getElementById('vc-issuer-select');
   if (!sel) return;
+
   try {
     const r = await fetch('/api/issuers');
     const dir = await r.json();
@@ -2319,13 +2331,24 @@ function stepBlock(key, val, mono) {
 }
 
 async function verifyData(tampered) {
-  if (!currentDataDID) { showToast('请先提交数据上链', 'err'); return; }
+  if (!currentDataDID) { showToast('请先选择数据记录', 'err'); return; }
   const btn = tampered ? document.getElementById('btn-verify-tamper') : document.getElementById('btn-verify-orig');
   setBusy(btn, true, '验证中…');
   try {
+    // Use the genuine original data of the selected record (not the 上链存证 textarea)
+    let rawData = selectedRawData;
+    if (!rawData && currentDataDID) {
+      try {
+        if (!csrfToken) { await fetchCsrfToken(); }
+        const r0 = await securePost('/api/reveal', { data_did: currentDataDID });
+        const d0 = await r0.json();
+        if (d0.success) { rawData = d0.raw_data || ''; selectedRawData = rawData; }
+      } catch (e) { /* ignore */ }
+    }
+    if (!rawData) rawData = document.getElementById('raw-data').value.trim();
     const r = await securePost('/api/verify', {
       data_did: currentDataDID,
-      raw_data: document.getElementById('raw-data').value.trim(),
+      raw_data: rawData,
       tampered: tampered
     });
     const result = await r.json();
@@ -2380,7 +2403,37 @@ function cell(num, name, cls, status, detail) {
     '</div>';
 }
 
+function parseMeta(metaStr) {
+  try {
+    const m = typeof metaStr === 'string' ? JSON.parse(metaStr) : (metaStr || {});
+    const biz = m.metadata || m;
+    return { raw: m, biz: (typeof biz === 'string') ? JSON.parse(biz) : (biz || {}) };
+  } catch(e) { return { raw: {}, biz: {} }; }
+}
+
+function renderSelectedDataPreview(data) {
+  const div = document.getElementById('selected-preview');
+  if (!div) return;
+  div.style.display = 'block';
+  const meta = parseMeta(data.metadata);
+  const biz = meta.biz || {};
+  let bizHtml = '';
+  Object.keys(biz).forEach(function(k) {
+    bizHtml += '<span class="vd-label">' + escapeHtml(k) + '</span> ' + escapeHtml(String(biz[k])) + '　';
+  });
+  div.innerHTML =
+    '<div class="result-title"><span class="ico"></span>已选数据 — 验证对象</div>' +
+    '<div class="code-block">' +
+      '<span class="k">data_did</span>: <span class="v">' + escapeHtml(data.data_did) + '</span><br>' +
+      '<span class="k">类型</span>: <span class="v">' + escapeHtml(data.data_type || '') + '</span><br>' +
+      (bizHtml ? '<span class="k">业务字段</span>: <span class="v">' + bizHtml + '</span><br>' : '') +
+      '<span class="k">原始数据</span>: <span class="v" style="white-space:pre-wrap;">' + escapeHtml(data.raw_data || '(无)') + '</span>' +
+    '</div>';
+}
+
+
 async function loadRecords(page) {
+  console.log('[loadRecords] STARTED page=', page);
   try {
     if (typeof page === 'number') recordsPage = page;
     const r = await fetch('/api/records?page=' + recordsPage + '&per_page=' + recordsPerPage);
@@ -2413,7 +2466,9 @@ async function loadRecords(page) {
         '</tr>';
     }).join('');
     // ---- Rich Select: populate searchable dropdown ----
-    populateRichSelect(allRecordsForDropdown || records);
+      console.log('[loadRecords] calling populateRichSelect n=', (allRecordsForDropdown||records).length);
+  populateRichSelect(allRecordsForDropdown || records);
+  console.log('[loadRecords] after populateRichSelect');
     // Async fetch all records for rich-select if not yet loaded
     if (!allRecordsForDropdown) {
       fetch('/api/records?per_page=10000').then(function(r) { return r.json(); }).then(function(all) {
@@ -2467,9 +2522,13 @@ function renderPagination() {
 function selectRecord(did) {
   currentDataDID = did;
   document.getElementById('verify-did').value = did;
+  loadSelectedRecord(did);
   showToast('已定位到「四重验证」模块，可验证原始数据 / 模拟篡改', 'ok');
-  const sec = document.querySelector('.section:nth-of-type(2)');
+  const sec = document.getElementById('sec-verify');
   if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // Activate sidebar nav for verify section
+  const verifyNav = document.querySelector('.nav-item[data-target="sec-verify"]');
+  if (verifyNav) { document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active')); verifyNav.classList.add('active'); }
 }
 
 /* ─── 多选 + 批量操作 ─── */
@@ -2648,24 +2707,47 @@ async function initShareFromUrl() {
 
 async function revealNonce(did) {
   try {
+    if (!csrfToken) { await fetchCsrfToken(); }
     const r = await securePost('/api/reveal', { data_did: did });
     const data = await r.json();
     if (!data.success) { showToast(data.error, 'err'); return; }
     const div = document.getElementById('verify-result');
     div.style.display = 'block';
+    const meta = parseMeta(data.metadata);
+    const biz = meta.biz || {};
+    let bizHtml = '';
+    Object.keys(biz).forEach(function(k) {
+      bizHtml += '<div class="reveal-biz-row"><span class="vd-label">' + escapeHtml(k) + '</span><span class="vd-val">' + escapeHtml(String(biz[k])) + '</span></div>';
+    });
+    const ts = data.timestamp ? String(data.timestamp).replace('T', ' ') : '(无)';
+    const cmValid = data.commitment_valid;
     div.innerHTML =
       '<div class="result-title"><span class="ico"></span>承诺揭晓 — 争议仲裁用</div>' +
-      '<div class="code-block">' +
-        '<span class="k">data_did</span>: <span class="v">' + data.data_did + '</span><br>' +
+      '<div class="reveal-grid">' +
+        revealRow('data_did', data.data_did) +
+        revealRow('承诺时间', ts) +
+        revealRow('数据类型', data.data_type || '') +
+        revealRow('承诺人', data.owner_did || '') +
+        revealRow('链上TX', (data.chain_tx_id || '') + (data.block_height ? '  #' + data.block_height : '')) +
+      '</div>' +
+      '<div class="reveal-proof ' + (cmValid ? 'ok' : 'bad') + '">' +
+        (cmValid ? '承诺绑定有效：Commit(fp, nonce) == C ✓' : '承诺绑定异常 ✗') +
+      '</div>' +
+      (bizHtml ? '<div class="reveal-biz"><div class="rl">业务字段（供争议方核验）</div>' + bizHtml + '</div>' : '') +
+      '<div class="code-block" style="margin-top:8px;">' +
         '<span class="k">fingerprint</span>: <span class="v">' + data.fingerprint + '</span><br>' +
         '<span class="k">nonce</span>: <span class="v">' + data.nonce + '</span><br>' +
         '<span class="k">commitment</span>: <span class="v">' + data.commitment + '</span>' +
       '</div>' +
-      '<p style="margin-top:10px; color:var(--ink-3); font-size:var(--t-small);">' + data.note + '</p>';
+      '<div class="reveal-raw"><div class="rl">原始数据（争议方可据此自行计算 SM3 比对）</div><pre>' + escapeHtml(data.raw_data || '(无)') + '</pre></div>' +
+      '<p style="margin-top:10px; color:var(--ink-3); font-size:var(--t-small);">' + escapeHtml(data.note) + '</p>';
     showToast('承诺已揭晓 — DID: ' + data.data_did.substring(0, 16) + '...', 'ok');
-    // Scroll to result
     div.scrollIntoView({ behavior: 'smooth', block: 'center' });
   } catch (e) { showToast('揭示失败: ' + e.message, 'err'); }
+}
+
+function revealRow(k, v) {
+  return '<div class="reveal-row"><span class="rk">' + escapeHtml(k) + '</span><span class="rv">' + escapeHtml(String(v || '')) + '</span></div>';
 }
 
 let wmEmbedParams = null;
@@ -2674,7 +2756,6 @@ let recordsPerPage = 10;
 let recordsTotal = 0;
 let recordsTotalPages = 1;
 let allRecordsForDropdown = null; // 缓存全部记录，用于验证下拉框
-
 
 let wmDiffData = null;
 
@@ -2874,7 +2955,6 @@ async function embedWatermark() {
   } catch (e) { showToast('嵌入失败: ' + e.message, 'err'); }
   finally { setBusy(btn, false, '嵌入水印'); }
 }
-
 
 function renderSpectrum(canvasId, spectrumData) {
   const canvas = document.getElementById(canvasId);
@@ -3315,7 +3395,6 @@ function setWmView(view) {
   }
 }
 
-
 // === Custom attack and upload verify ===
 
 // Update slider value displays
@@ -3571,6 +3650,8 @@ function extractRecordLabel(rec) {
 
 function getTypeLabel(type) {
   var map = { transport:'\u8fd0\u8f93', quarantine:'\u68c0\u75ab', slaughter:'\u5c4e\u5bb6', transaction:'\u4ea4\u6613', declare:'\u7533\u62a5' }
+  return map[type] || type;
+}
 
 // ===== Native Select (optgroup-style) Renderer =====
 function renderNativeSelectOptions(records) {
@@ -3645,10 +3726,22 @@ function filterRecordSelect(query) {
 }
 
 function onRecordSelect() {
-  currentDataDID = (document.getElementById('verify-did').value || '');
+  const did = (document.getElementById('verify-did').value || '');
+  currentDataDID = did;
+  selectedRawData = null;
+  if (did) { loadSelectedRecord(did); }
 }
-;
-  return map[type] || type;
+
+async function loadSelectedRecord(did) {
+  try {
+    if (!csrfToken) { await fetchCsrfToken(); }
+    const r = await securePost('/api/reveal', { data_did: did });
+    const data = await r.json();
+    if (data.success) {
+      selectedRawData = data.raw_data || '';
+      renderSelectedDataPreview(data);
+    }
+  } catch (e) { /* non-fatal: verifyData will fall back to fetch */ }
 }
 
 function escapeHtml(s) {
@@ -3661,7 +3754,9 @@ function populateRichSelect(recordList) {
     var label = extractRecordLabel(rec);
     return Object.assign({}, rec, { _rsLabel: label });
   });
+  console.log('[populateRichSelect] calling with', _rsAllRecords.length, 'records');
   renderNativeSelectOptions(_rsAllRecords);
+  console.log('[populateRichSelect] done, options=', document.getElementById('verify-did').options.length);
 }
 
 function filterRichSelect(query) {
@@ -3807,10 +3902,13 @@ function toggleRichSelect() {
 function closeRichSelect() {
   var dropdown = document.getElementById('rs-dropdown');
   var container = document.getElementById('verify-did');
-  dropdown.style.display = 'none';
-  dropdown.style.top = '';
-  dropdown.style.left = '';
-  dropdown.style.width = '';
+  if (dropdown) {
+    dropdown.style.display = 'none';
+    dropdown.style.top = '';
+    dropdown.style.left = '';
+    dropdown.style.width = '';
+  }
+
   container.classList.remove('open');
   _rsActiveIndex = -1;
 }
@@ -3857,7 +3955,6 @@ document.addEventListener('click', function(e) {
     closeRichSelect();
   }
 });
-
 
 // 窗口resize时重定位下拉框
 window.addEventListener('resize', function() {
