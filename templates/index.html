@@ -2285,6 +2285,29 @@ function applyCertToRaw() {
 
 async function submitData() {
   const btn = document.getElementById('btn-submit');
+  // 强制将当前检疫证号写入原始数据，确保上链必含证号
+  applyCertToRaw();
+  // 检疫证号必填 + 格式校验（4 类业务记录均要求）
+  const certVal = document.getElementById('cert-no').value.trim();
+  const dtype = document.getElementById('data-type').value;
+  const REQUIRE_CERT = ['quarantine', 'transaction', 'transport', 'slaughter'];
+  if (REQUIRE_CERT.includes(dtype)) {
+    const certEl = document.getElementById('cert-no');
+    if (!certVal) {
+      certEl.classList.add('input-err');
+      const hint = document.getElementById('cert-hint');
+      if (hint) { hint.textContent = '检疫证号为必填项，请先填写（如 JC2026-00158）'; hint.className = 'field-hint err'; }
+      showToast('请先填写检疫证号再上链', 'err');
+      return;
+    }
+    if (!/^JC\d{4}-[A-Z0-9]+$/.test(certVal)) {
+      certEl.classList.add('input-err');
+      const hint = document.getElementById('cert-hint');
+      if (hint) { hint.textContent = '检疫证号格式不正确，应为 JC + 年份(4位) + - + 编号（如 JC2026-00158）'; hint.className = 'field-hint err'; }
+      showToast('检疫证号格式不正确，无法上链', 'err');
+      return;
+    }
+  }
   const rawData = document.getElementById('raw-data').value.trim();
   if (!rawData) { showToast('请输入原始数据', 'err'); return; }
   setBusy(btn, true, '上链中…');

@@ -156,6 +156,10 @@ def api_submit():
     raw = d.get('raw_data','').strip()
     if not raw: return jsonify({'success':False,'error':'raw_data empty'}),400
     dtype = d.get('data_type','通用')
+    # 后端兜底：4 类业务记录必须携带合法检疫证号，未携带直接拒绝上链
+    _REQUIRE_CERT = {'quarantine', 'transaction', 'transport', 'slaughter'}
+    if dtype in _REQUIRE_CERT and not re.search(r'JC\d{4}-[A-Z0-9]+', raw):
+        return jsonify({'success': False, 'error': '检疫证号缺失或格式非法（应为 JC+年份4位+-+编号，如 JC2026-00158），拒绝上链'}), 400
     meta = extract_metadata(raw, dtype)
     fp_r = generate_fingerprint(raw, meta)
     fp = fp_r['fingerprint']
