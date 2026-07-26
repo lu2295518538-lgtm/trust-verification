@@ -1372,7 +1372,7 @@ farmName: XX生态养殖场
 inspector: 张XX</textarea>
         </div>
         <div class="field">
-          <label class="field-label">纳入承诺的模块（模块化选择性披露）</label>
+          <label class="field-label">纳入模块 <span class=vc-hint>(Level 1: 决定哪些数据进入凭证并被密码学绑定)</span></label>
           <div class="claim-check" id="vc-modules">
             <label><input type="checkbox" data-mod="basic" checked> basic（基础信息）</label>
             <label><input type="checkbox" data-mod="ownership" checked> ownership（权属）</label>
@@ -1380,7 +1380,7 @@ inspector: 张XX</textarea>
           </div>
         </div>
         <div class="field">
-          <label class="field-label">披露模式</label>
+          <label class="field-label">凭证模式 <span class=vc-hint>(Level 1: 明文 or 零知识)</span></label>
           <div class="claim-check">
             <label><input type="radio" name="vc-mode" value="full" checked> 全披露（携带明文 + 盲因子 r）</label>
             <label><input type="radio" name="vc-mode" value="zk"> 零知识证明（仅承诺 + ZK &#960;）</label>
@@ -1396,10 +1396,11 @@ inspector: 张XX</textarea>
         <div class="verify-result" id="vc-verify-output" style="display:none;"></div>
       </div>
 
+<!-- VC → VP 数据流连接器 -->      <div class="vc-vp-connector" id="vc-vp-connector" style="display:none;margin:16px 0;padding:12px 20px;border-radius:10px;background:linear-gradient(135deg,#f0f7ff 0%,#fef6ee 100%);border-left:4px solid #378ADD;text-align:center;">        <div style="display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;">          <span style="font-size:12px;color:#888;font-weight:500;">VC 已生成</span>          <svg width="24" height="16" viewBox="0 0 24 16" fill="none"><path d="M2 8h18M17 3l5 5-5 5" stroke="#378ADD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>          <span style="font-size:13px;color:#042C53;font-weight:600;" id="connector-modules">basic + ownership</span>          <span style="font-size:11px;color:#b45309;background:#fff8e6;padding:2px 8px;border-radius:10px;border:1px solid #f59e0b;">Level 2: 在此基础上选择披露范围</span>        </div>      </div>
       <!-- VP 构造 -->
       <div class="vc-demo-card">
         <h3><span class="badge-num">2</span> 构造 VP（可验证表达）</h3>
-        <div class="vc-hint" style="margin-bottom:8px;">VP 包裹已签发的 VC。零知识模式下不携带任何明文，验证方仅能确认承诺有效。</div>
+        <div class="vc-hint" style="margin-bottom:8px;">VP 包裹已生成的 VC（<b>Level 2</b>：在 VC 已纳入的模块基础上，选择向验证方披露的范围）。</div>
         <div class="field">
           <label class="field-label" for="vp-challenge">验证方挑战值 Challenge</label>
           <input class="input" id="vp-challenge" value="nonce-7d3e9f-2026" placeholder="防止重放的随机值">
@@ -1409,7 +1410,7 @@ inspector: 张XX</textarea>
           <input class="input" id="vp-domain" value="inspector.gov.cn" placeholder="凭证使用场景域名">
         </div>
         <div class="field">
-          <label class="field-label">VP 披露模式</label>
+          <label class="field-label">披露模式 <span class=vc-hint>(Level 2: 决定向验证方展示多少)</span></label>
           <div class="claim-check" id="vp-mode-box">
             <label><input type="radio" name="vp-mode" value="full" checked onchange="onVpModeChange()"> 全披露（携带全部明文）</label>
             <label><input type="radio" name="vp-mode" value="selective" onchange="onVpModeChange()"> 选择性披露（仅展示勾选字段）</label>
@@ -1735,6 +1736,8 @@ async function buildVC() {
     if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
     const vc = await r.json();
     currentVC = vc;
+    var _conn = document.getElementById('vc-vp-connector');
+    if (_conn) { _conn.style.display = 'block'; var _cm = (vc.credentialSubject || {}).modules || []; document.getElementById('connector-modules').textContent = (_cm.length ? _cm.join(' + ') : '(无)'); }
     _renderVpClaims(vc);
     const box = document.getElementById('vc-output');
     box.style.display = 'block'; box.innerHTML = syntaxHL(vc);
@@ -1769,10 +1772,10 @@ function _renderVpClaims(vc) {
     const mod = g[0], label = g[1];
     const fields = sd[mod];
     if (!fields || typeof fields !== 'object') return;
-    html += '<div style="margin:4px 0;"><b>' + esc(label) + '</b><br>';
+    html += '<div style="margin:6px 0;padding:6px 10px;background:#f8fafc;border-radius:6px;border-left:3px solid ' + (mod==='basic'?'#378ADD':mod==='ownership'?'#639922':'#D85A30') + ';"><b>' + esc(label) + '</b> <span style="font-size:11px;color:#888;font-weight:400;">(来自 VC 纳入模块)</span><br>';
     Object.keys(fields).forEach(function (f) {
       const path = mod + '.' + f;
-      html += '<label style="margin-right:10px;display:inline-block;"><input type="checkbox" value="' + esc(path) + '" checked> ' + esc(f) + '</label>';
+      html += '<label style="margin-right:12px;display:inline-block;margin-top:4px;"><input type="checkbox" value="' + esc(path) + '" checked> <span style="font-size:13px;">' + esc(f) + '</span></label>';
     });
     html += '</div>';
   });
@@ -1786,6 +1789,9 @@ function onVpModeChange() {
   const mode = (document.querySelector('input[name=vp-mode]:checked') || {}).value || 'full';
   const claims = document.getElementById('vp-claims');
   if (claims) claims.style.display = (mode === 'selective') ? 'block' : 'none';
+  if (mode === 'selective' && claims && !claims.innerHTML.trim() && typeof currentVC !== 'undefined' && currentVC) {
+    _renderVpClaims(currentVC);
+  }
 }
 
 async function buildVP() {

@@ -1,20 +1,45 @@
 #!/usr/bin/env python3
-"""PHFRFM 极谐波分数傅里叶矩零水印核心算法
+"""PHFRFM 极谐波分数傅里叶矩零水印核心算法（性能优化版 v2）
 
 Reference: "极谐波分数傅里叶矩及其零水印算法应用"
 Key concepts:
 - Polar Harmonic Fractional Fourier Moments (PHFRFM)
 - Fractional order p controls radial basis decay
-- Zero watermark: XOR(feature_bits, DID_bits) → no pixel modification
+- Zero watermark: XOR(feature_bits, DID_bits) -> no pixel modification
+
+v2 性能优化（2026-07-26）:
+- 图像下采样至 max_side=300px 后算矩（唯一改动，~4x 加速）
+  PHFRFM 矩在极坐标下对分辨率不敏感，低分辨率特征稳定
+  生成和提取均使用同一缩放路径，保证一致性
 """
 
 import numpy as np
 from scipy.special import eval_genlaguerre
+from PIL import Image as PILImage
+
+# ── 可调参数 ──────────────────────────────────────────────
+_MAX_SIDE_FOR_MOMENTS = 300   # 算矩前图像最长边上限（像素）
+
+
+def _downsample_for_moments(image, max_side=_MAX_SIDE_FOR_MOMENTS):
+    """将图像下采样至 max_side 以加速矩计算。PHFRFM 矩在低分辨率下特征稳定。"""
+    H, W = image.shape
+    if max(H, W) <= max_side:
+        return image
+    scale = max_side / max(H, W)
+    H_new, W_new = int(H * scale), int(W * scale)
+    img_uint8 = (np.clip(image, 0, 1) * 255).astype(np.uint8)
+    img_small = np.array(
+        PILImage.fromarray(img_uint8).resize((W_new, H_new), PILImage.LANCZOS),
+        dtype=np.float64,
+    ) / 255.0
+    return img_small
+
 
 def _normalize_to_disk(image):
     """
-    Normalize image to unit disk (radius ≤ 1).
-    Returns: (norm_image, H, W) where norm_image is defined on r ∈ [0, 1]
+    Normalize image to unit disk (radius <= 1).
+    Returns: (r, theta, mask, params)
     """
     H, W = image.shape
     cx, cy = W / 2.0, H / 2.0
@@ -33,32 +58,29 @@ def _normalize_to_disk(image):
 
     return r, theta, mask, (H, W, radius, cx, cy)
 
+
 def _phfrfm_radial(r, n, p):
     """
     PHFRFM radial basis function.
-    R_n(r, p) = exp(-r²/2) * r^|2n| * L_n^{(|2n|)}(r², p)
-
-    Where L_n^{(α)}(x, p) is the generalized Laguerre polynomial evaluated
-    at scaled argument with fractional modulation.
+    R_n(r, p) = exp(-r^2/2) * r^|2n| * L_n^{(|2n|)}(r^2, p)
     """
     # Prevent r=0 issues
     r_safe = np.maximum(r, 1e-10)
 
-    # Radial part: exp(-r²/2) * r^(2n) with fractional modulation
+    # Radial part: exp(-r^2/2) * r^(2n) with fractional modulation
     radial = np.exp(-r_safe**2 / 2.0) * (r_safe**(2 * abs(n)))
 
-    # Generalized Laguerre polynomial: L_n^(|2n|)(r²)
-    # Scipy's eval_genlaguerre(n, alpha, x)
+    # Generalized Laguerre polynomial: L_n^(|2n|)(r^2)
     alpha = 2 * abs(n)
     x = r_safe**2
 
     # Apply fractional modulation via parameter p
-    # p controls the effective argument scaling
     x_scaled = x ** p * (1 + p * (1 - x))
 
     laguerre = eval_genlaguerre(n, alpha, x_scaled)
 
     return radial * laguerre
+
 
 def compute_phfrfm_moments(image, max_order=25, p=0.3):
     """
@@ -70,16 +92,19 @@ def compute_phfrfm_moments(image, max_order=25, p=0.3):
         p: fractional order parameter
 
     Returns:
-        moments: dict mapping (n, m) → complex moment value
+        moments: dict mapping (n, m) -> complex moment value
         num_moments: total number of unique moments
     """
-    r, theta, mask, params = _normalize_to_disk(image)
+    # ── 优化: 下采样 ──
+    img_work = _downsample_for_moments(image)
+
+    r, theta, mask, params = _normalize_to_disk(img_work)
     if r is None:
         return {}, 0
 
     H, W, radius, cx, cy = params
     dr = 1.0 / min(H, W) * 2  # radial step
-    dtheta = 2 * np.pi / 180   # angular step (~2°)
+    dtheta = 2 * np.pi / 180   # angular step (~2 degrees)
 
     # Pre-compute radial functions for each order n
     # to avoid redundant calculations
@@ -93,7 +118,7 @@ def compute_phfrfm_moments(image, max_order=25, p=0.3):
 
     for n in range(max_order + 1):
         R_n = radial_cache[n]
-        # For each n, m runs from -n to n (if using, just abs(m) for symmetric)
+        # For each n, m runs from -n to n (symmetric: just abs(m))
         for abs_m in range(n + 1):
             m = abs_m if abs_m % 2 == 0 else -abs_m
 
@@ -102,13 +127,13 @@ def compute_phfrfm_moments(image, max_order=25, p=0.3):
                 kernel_r = R_n * np.cos(m * theta) * r
             else:
                 # Imaginary part (sine)
-                kernel_r = R_n * np.sin(abs(m) * theta) * r
+                kernel_r = R_n * np.sin(abs_m * theta) * r
 
             kernel_r[~mask] = 0.0
 
-            # Moment = ∫∫ f(r,θ) * kernel * r * dr * dθ
+            # Moment = integral of f(r,theta) * kernel * r * dr * dtheta
             k_masked = kernel_r[mask]
-            i_masked = image[mask]
+            i_masked = img_work[mask]
             moment = np.sum(k_masked * i_masked) * dr * dtheta
 
             # Store magnitude (rotation invariant)
@@ -116,6 +141,7 @@ def compute_phfrfm_moments(image, max_order=25, p=0.3):
             num_moments += 1
 
     return moments, num_moments
+
 
 def phfrfm_zero_generate(image, did_bits, max_order=25, p=0.3):
     """
@@ -126,7 +152,7 @@ def phfrfm_zero_generate(image, did_bits, max_order=25, p=0.3):
     2. Sort moments by magnitude (most significant first)
     3. Take enough coefficients to match watermark length
     4. Binarize using median threshold
-    5. XOR with DID bits → key
+    5. XOR with DID bits -> key
 
     Returns: (key, feature_bits)
     """
@@ -169,6 +195,7 @@ def phfrfm_zero_generate(image, did_bits, max_order=25, p=0.3):
     # XOR
     key = np.bitwise_xor(feature_bits, did_bits)
     return key.astype(np.uint8), feature_bits.astype(np.uint8)
+
 
 def phfrfm_zero_extract(image, key, max_order=25, p=0.3):
     """
