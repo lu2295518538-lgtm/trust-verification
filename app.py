@@ -13,6 +13,7 @@ from core.sm2_sign import generate_keypair, sign_string, verify as sm2_verify
 from core.did_manager import generate_did, create_on_chain_record
 from core.metadata_extractor import extract_metadata
 from core.vc_manager import request_credential, verify_credential, construct_presentation, verify_presentation, get_issuer_info, get_ca_directory, ca_store
+from core.issuer_ca import resolve_party_ca_link
 from core.chainmaker_client import check_chain_status, store_on_chain, query_from_chain, verify_against_chain
 from core.watermark_dft import (embed_entire_watermark, extract_entire_watermark, _img_to_gray, zero_watermark_extract, encode_watermark_message, zero_watermark_generate)
 from core.phfrfm_core import phfrfm_zero_generate, phfrfm_zero_extract
@@ -407,6 +408,23 @@ def api_records_trace():
     }
     for _st in stages:
         _st['ts'] = _ts_map.get(_st['key'])
+
+    # ---- 业务地理维度：为每个阶段推断区域（用于地图可视化）----
+    # 优先取该阶段所属存证的主体绑定区域；否则按阶段语义给默认区域。
+    _linked_by_did = {r.get('data_did'): r for r in linked}
+    _stage_region_default = {'declare': '华北', 'inspect': '华北', 'cert': '华北',
+                             'trade': '华东', 'trans': '西南', 'slaughter': '华南',
+                             'dispose': '华南'}
+    for _st in stages:
+        _reg = _stage_region_default.get(_st['key'], '华北')
+        _rec = _linked_by_did.get(_st.get('record')) if _st.get('record') else None
+        if _rec:
+            _pb = _rec.get('party_binding')
+            if not isinstance(_pb, dict):
+                _pb = parse_meta(_rec)[0].get('_party_binding')
+            if isinstance(_pb, dict) and _pb.get('region'):
+                _reg = _pb['region']
+        _st['region'] = _reg
 
     _unreg = [r for r in linked if isinstance(parse_meta(r)[0].get('_party_binding'), dict)
               and parse_meta(r)[0]['_party_binding'].get('registered') is False]
@@ -1024,18 +1042,21 @@ CREDIT_RE = re.compile(r"(?:统一社会信用代码|信用代码|养殖场代�
 def get_seed_parties():
     """主数据目录：养殖场 / 屠宰场 / 官方兽医。种子规范主体 + 聚合库内已出现信用代码。"""
     seeds = [
+        # 主体 DID 统一到 did:trust:livestock:party:<issuer_id>:<short> 命名空间，
+        # 把"由哪个签发机构背书"编码进 DID，实现 CA 强绑定（issuer_id 对应 ca_store 中
+        # 真实可信的签发机构 DID 后缀）。
         {"role": "farm", "name": "XX生态养殖场", "credit_code": "91110000MA01XXXXX2",
-         "did": "did:chainmaker:party:farm:xxst", "region": "华北"},
+         "did": "did:trust:livestock:party:livestock_authority_001:xxst", "region": "华北"},
         {"role": "farm", "name": "绿源牧业有限公司", "credit_code": "91110000MA02BBBBB3",
-         "did": "did:chainmaker:party:farm:ly", "region": "东北"},
+         "did": "did:trust:livestock:party:livestock_authority_001:ly", "region": "东北"},
         {"role": "farm", "name": "康达生态养殖基地", "credit_code": "91110000MA03CCCCC4",
-         "did": "did:chainmaker:party:farm:kd", "region": "西南"},
+         "did": "did:trust:livestock:party:livestock_authority_001:kd", "region": "西南"},
         {"role": "slaughter", "name": "XX肉类食品有限公司", "credit_code": "91110000MA01XXXXY8",
-         "license": "A201400XX", "did": "did:chainmaker:party:slaughter:xxmr", "region": "华北"},
+         "license": "A201400XX", "did": "did:trust:livestock:party:slaughter_b:xxmr", "region": "华北"},
         {"role": "slaughter", "name": "鲜丰屠宰加工股份有限公司", "credit_code": "91110000MA04DDDDD5",
-         "license": "A201400YY", "did": "did:chainmaker:party:slaughter:xf", "region": "华东"},
-        {"role": "vet", "name": "XX市畜牧兽医检疫站", "did": "did:chainmaker:party:vet:xx", "region": "华北"},
-        {"role": "vet", "name": "YY区动物卫生监督所", "did": "did:chainmaker:party:vet:yy", "region": "华东"},
+         "license": "A201400YY", "did": "did:trust:livestock:party:slaughter_b:xf", "region": "华东"},
+        {"role": "vet", "name": "XX市畜牧兽医检疫站", "did": "did:trust:livestock:party:vet_station_a:xx", "region": "华北"},
+        {"role": "vet", "name": "YY区动物卫生监督所", "did": "did:trust:livestock:party:vet_station_a:yy", "region": "华东"},
     ]
     try:
         con = sqlite3.connect(DB_PATH); con.row_factory = sqlite3.Row
@@ -1078,10 +1099,13 @@ def get_party_binding(raw, meta):
     seeds = get_seed_parties()
     party = next((p for p in seeds if p.get("credit_code") == code), None)
     if party:
+        _link = resolve_party_ca_link(party.get("did"))
         return {"code": code, "name": party.get("name"), "did": party.get("did"),
                 "role": party.get("role"), "registered": True,
-                "ca_linked": bool(party.get("did") and party.get("did") in (ca_store.trusted_issuer_dids() if ca_store else []))}
-    return {"code": code, "name": None, "did": None, "role": "unknown", "registered": False, "ca_linked": False}
+                "ca_linked": _link["ca_linked"], "ca_issuer": _link["ca_issuer"],
+                "ca_name": _link["ca_name"], "ca_reason": _link["ca_reason"]}
+    return {"code": code, "name": None, "did": None, "role": "unknown", "registered": False,
+            "ca_linked": False, "ca_issuer": None, "ca_name": None, "ca_reason": "no_party"}
 
 
 def lookup_party(code=None, name=None, did=None):
@@ -1097,19 +1121,12 @@ def lookup_party(code=None, name=None, did=None):
     found = bool(party)
     did_bound = bool(party and party.get("did"))
     registered = bool(party and party.get("did") and not party.get("history"))
-    ca_linked = False
-    if party and party.get("did"):
-        try:
-            if party["did"] in (ca_store.trusted_issuer_dids() if ca_store else []):
-                ca_linked = True
-            else:
-                for iss in (get_ca_directory() or {}).get("issuers", []):
-                    sub = iss.get("subject", {})
-                    if sub.get("name") and party.get("name") and (sub["name"] in party["name"] or party["name"] in sub["name"]):
-                        ca_linked = True
-                        break
-        except Exception:
-            ca_linked = False
+    _link = resolve_party_ca_link(party.get("did")) if party and party.get("did") else \
+        {"ca_linked": False, "ca_issuer": None, "ca_name": None, "reason": "no_did"}
+    ca_linked = _link["ca_linked"]
+    ca_issuer = _link["ca_issuer"]
+    ca_name = _link["ca_name"]
+    ca_reason = _link["ca_reason"]
     records_count = 0
     key = code or (party.get("credit_code") if party else None)
     try:
@@ -1128,13 +1145,25 @@ def lookup_party(code=None, name=None, did=None):
     except Exception:
         pass
     return {"found": found, "party": party, "did_bound": did_bound,
-            "registered": registered, "ca_linked": ca_linked, "records_count": records_count}
+            "registered": registered, "ca_linked": ca_linked,
+            "ca_issuer": ca_issuer, "ca_name": ca_name, "ca_reason": ca_reason,
+            "records_count": records_count}
 
 
 @app.route('/api/parties')
 def api_parties():
     seeds = get_seed_parties()
-    return jsonify({"parties": seeds, "count": len(seeds)})
+    # 为每个主体附加 CA 强绑定解析结果（与 /api/party/lookup 同源，避免前端重复判定）
+    out = []
+    for p in seeds:
+        _link = resolve_party_ca_link(p.get("did"))
+        _p = dict(p)
+        _p["ca_linked"] = _link["ca_linked"]
+        _p["ca_issuer"] = _link["ca_issuer"]
+        _p["ca_name"] = _link["ca_name"]
+        _p["ca_reason"] = _link["ca_reason"]
+        out.append(_p)
+    return jsonify({"parties": out, "count": len(out)})
 
 
 @app.route('/api/party/lookup')

@@ -99,6 +99,19 @@
   .chain-risk.high{background:rgba(255,107,107,.14);color:var(--no);border:1px solid rgba(255,107,107,.4)}
   .chain-risk.med{background:rgba(246,183,60,.14);color:var(--warn);border:1px solid rgba(246,183,60,.45)}
   .chain-risk.low{background:rgba(255,255,255,.06);color:var(--ink-dim);border:1px solid var(--line)}
+  /* 模块⑤ 移动端紧凑时间轴 */
+  .mini-tl{margin:10px 0;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+  .mini-tl-title{font-size:12px;color:var(--ink-dim);margin-bottom:6px;font-weight:600}
+  .mini-tl-track{position:relative;height:64px;margin:0 6px}
+  .mini-tl-track:before{content:"";position:absolute;left:0;right:0;top:9px;height:2px;background:var(--line)}
+  .mini-tl-node-wrap{position:absolute;top:0;transform:translateX(-50%);text-align:center;width:64px}
+  .mini-tl-node{width:18px;height:18px;border-radius:50%;margin:0 auto;border:2px solid var(--line)}
+  .mini-tl-node.done{background:rgba(47,208,122,.5);border-color:var(--ok)}
+  .mini-tl-node.missing{background:transparent;border-style:dashed;border-color:var(--no)}
+  .mini-tl-node.blocked,.mini-tl-node.timeout{background:rgba(255,107,107,.6);border-color:var(--no)}
+  .mini-tl-node.required{background:rgba(246,183,60,.5);border-color:var(--warn)}
+  .mini-tl-lab{font-size:10px;color:var(--ink-dim);margin-top:3px;line-height:1.2}
+  .mini-tl-ts{font-size:9px;color:var(--ink-dim);opacity:.8;margin-top:1px}
 </style>
 </head>
 <body>
@@ -588,6 +601,27 @@ async function showBatchChain(){
       }
     });
     html += '</div>';
+
+    // 模块⑤：移动端紧凑时间轴（按时间戳排布已完成阶段）
+    var stages = (r.stages || []).filter(function (s) { return s.key !== 'dispose'; });
+    var timed = stages.filter(function (s) { return s.ts; });
+    if (timed.length >= 2) {
+      var times = timed.map(function (s) { return Date.parse(s.ts); });
+      var tmin = Math.min.apply(null, times), tmax = Math.max.apply(null, times);
+      var span = (tmax - tmin) || 1;
+      var tl = '<div class="mini-tl"><div class="mini-tl-title">业务时间轴（按时间戳）</div><div class="mini-tl-track">';
+      stages.forEach(function (s) {
+        if (!s.ts) return;
+        var pct = (Date.parse(s.ts) - tmin) / span * 100;
+        var cls = 'mini-tl-node ' + s.status + (s.timeout ? ' timeout' : '');
+        tl += '<div class="mini-tl-node-wrap" style="left:' + pct.toFixed(1) + '%">'
+            + '<div class="' + cls + '"></div>'
+            + '<div class="mini-tl-lab">' + esc(s.label) + '</div>'
+            + '<div class="mini-tl-ts">' + esc(fmtTs(s.ts)) + '</div></div>';
+      });
+      tl += '</div></div>';
+      html += tl;
+    }
 
     var risks = sum.risks || [];
     html += '<div class="chain-risk-panel">';

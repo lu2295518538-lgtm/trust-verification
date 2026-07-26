@@ -1167,6 +1167,46 @@ body {
 .ext-ca-form input, .ext-ca-form textarea { width: 100%; padding: 8px 10px; border: 1px solid #cdd6cd; border-radius: 9px; font-size: .85rem; font-family: inherit; }
 .ext-ca-form textarea { resize: vertical; min-height: 54px; }
 @media (max-width: 780px) { .ext-ca-grid { grid-template-columns: 1fr; } }
+.pl-card { background: #fff; border: 1px solid #d8e0d8; border-radius: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.pl-card.linked { border-color: rgba(34,197,94,.55); box-shadow: 0 1px 0 rgba(34,197,94,.12); }
+.pl-card.unlinked { border-style: dashed; }
+.pl-name { font-weight: 600; color: #16241c; font-size: .95rem; }
+.pl-meta { font-size: .76rem; color: #6b7a72; display: flex; gap: 8px; flex-wrap: wrap; }
+.pl-did { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .72rem; color: #51615a; word-break: break-all; }
+.pl-badge { font-size: .74rem; padding: 2px 8px; border-radius: 999px; display: inline-block; align-self: flex-start; }
+.pl-badge.ok { background: rgba(34,197,94,.14); color: #15803d; border: 1px solid rgba(34,197,94,.4); }
+.pl-badge.warn { background: rgba(234,179,8,.14); color: #a16207; border: 1px solid rgba(234,179,8,.5); }
+
+/* ── 业务时间轴 + 地理流向（模块⑤可视化增强）── */
+.trace-sub { margin-top: 18px; background: #f6f9f6; border: 1px solid #e3e8e3; border-radius: 14px; padding: 14px 16px; }
+.trace-sub-title { font-size: .82rem; color: #51615a; margin-bottom: 10px; font-weight: 600; }
+.tl-svg, .map-svg { width: 100%; height: auto; display: block; }
+.tl-axis { stroke: #cdd6cd; stroke-width: 3; }
+.tl-seg { stroke: #34a853; stroke-width: 3; }
+.tl-seg.gap { stroke: #cbd5cb; stroke-dasharray: 4 4; }
+.tl-seg.timeout { stroke: #dc2626; stroke-width: 3; }
+.tl-node { fill: #fff; stroke: #34a853; stroke-width: 3; }
+.tl-node.done { fill: #34a853; }
+.tl-node.missing { fill: #fff; stroke: #9aa79a; stroke-dasharray: 3 3; }
+.tl-node.blocked, .tl-node.timeout { fill: #dc2626; stroke: #dc2626; }
+.tl-label { font-size: 13px; fill: #16241c; font-weight: 600; }
+.tl-tick { font-size: 12px; fill: #6b7a72; }
+.tl-gap { font-size: 12px; fill: #a16207; font-weight: 600; }
+.tl-warn { font-size: 11px; fill: #dc2626; font-weight: 700; }
+.map-outline { fill: rgba(52,168,83,.06); stroke: #bcd4c2; stroke-width: 2; }
+.map-grid { fill: #dbe7df; }
+.map-grid-label { font-size: 11px; fill: #9aa79a; }
+.map-route { stroke: #1d8fb0; stroke-width: 3; stroke-dasharray: 6 5; }
+.map-node { stroke-width: 3; }
+.map-node.done { fill: #34a853; stroke: #1f7a3d; }
+.map-node.missing { fill: #fff; stroke: #9aa79a; stroke-dasharray: 3 3; }
+.map-node.partial { fill: #facc15; stroke: #a16207; }
+.map-node.timeout { fill: #dc2626; stroke: #b91c1c; }
+.map-region { font-size: 13px; fill: #16241c; font-weight: 700; }
+.map-label { font-size: 11px; fill: #51615a; }
+@media (max-width: 780px) { .tl-label { font-size: 11px; } .map-label { font-size: 10px; } }
+.pl-badge.err { background: rgba(220,38,38,.12); color: #b91c1c; border: 1px solid rgba(220,38,38,.4); }
+.pl-ca { font-size: .76rem; color: #1d4ed8; }
 
 .trace-badge.warn{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.5);color:#a16207}
 .tc-party{margin-top:6px;font-size:12px;padding:3px 8px;border-radius:6px;display:inline-block}
@@ -1359,6 +1399,14 @@ inspector: 张XX</textarea>
       </div>
       <p class="ca-note">外部商业 CA 作为额外信任锚：其「成员」列表中的签发者，即使本信任锚未直接注册，验证时也会被认可为<strong>外部授信</strong>（状态 external）。停用后授信立即失效。外部 CA 根密钥仅展示指纹，不进入签名域。</p>
     </div>
+
+    <div class="ext-ca-wrap" id="party-link-wrap" style="border-top:1px dashed #d8e0d8;padding-top:18px;">
+      <div class="ext-ca-head">
+        <h3>主体 → CA 强绑定概览</h3>
+        <span class="ca-note" style="margin:0">统一命名空间 <code>did:trust:livestock:party:&lt;issuer_id&gt;:&lt;short&gt;</code>：背书签发机构直接编码进 DID，信任锚验签即强绑定</span>
+      </div>
+      <div class="ext-ca-grid" id="party-link-grid"></div>
+    </div>
   </div>
 
 <div id="toast" class="toast" style="display:none;"></div>
@@ -1466,6 +1514,7 @@ async function init() {
   try { loadParties(); } catch (e) { console.error('Parties:', e);   try { loadIssuers(); } catch (e) { console.error('Issuers:', e); } }
   try { renderCADirectory(); } catch (e) { console.error('CADir:', e); }
   try { loadExternalCAs(); } catch (e) { console.error('ExtCA:', e); }
+  try { loadPartyLinks(); } catch (e) { console.error('PartyLinks:', e); }
   try { renderIssuerInfo(); } catch (e) { console.error('IssuerInfo:', e); }
 }
 
@@ -1934,6 +1983,37 @@ async function enableExternalCA(id) {
   } catch (e) { showToast('启用失败：' + (e.message || e), 'err'); }
 }
 
+async function loadPartyLinks() {
+  const grid = document.getElementById('party-link-grid');
+  if (!grid) return;
+  try {
+    const r = await fetch('/api/parties');
+    const d = await r.json();
+    const parties = d.parties || [];
+    if (!parties.length) { grid.innerHTML = '<p class="ca-note">暂无主体。</p>'; return; }
+    let html = '';
+    parties.forEach(function (p) {
+      const linked = !!p.ca_linked;
+      const roleMap = { farm: '养殖场', slaughter: '屠宰场', vet: '官方兽医', unknown: '历史未登记' };
+      const role = roleMap[p.role] || p.role || '';
+      const cls = linked ? 'linked' : (p.history ? 'unlinked' : 'unlinked');
+      let badge;
+      if (!p.did) badge = '<span class="pl-badge warn">未分配 DID</span>';
+      else if (linked) badge = '<span class="pl-badge ok">🔗 CA 强绑定</span>';
+      else badge = '<span class="pl-badge err">⚠ 未绑定授信 CA</span>';
+      const caLine = linked && p.ca_name ? '<div class="pl-ca">背书：' + esc(p.ca_name) + '</div>' : '';
+      const didLine = p.did ? '<div class="pl-did">' + esc(p.did) + '</div>' : '';
+      html += '<div class="pl-card ' + cls + '">'
+        + '<div class="pl-name">' + esc(p.name || p.credit_code || '—') + '</div>'
+        + '<div class="pl-meta"><span>' + esc(role) + '</span>'
+        + (p.credit_code ? ('<span>信用代码 ' + esc(p.credit_code) + '</span>') : '')
+        + (p.region ? ('<span>区域 ' + esc(p.region) + '</span>') : '') + '</div>'
+        + didLine + caLine + badge + '</div>';
+    });
+    grid.innerHTML = html;
+  } catch (e) { console.error('loadPartyLinks:', e); }
+}
+
 function showVerifyResult(id, ok, detail) {
   const el = document.getElementById(id);
   el.style.display = 'block';
@@ -2077,13 +2157,22 @@ async function checkPartyTrust(name, code) {
     const url = '/api/party/lookup?' + (code ? ('code=' + encodeURIComponent(code)) : ('name=' + encodeURIComponent(name)));
     const r = await fetch(url);
     const d = await r.json();
-    const short = (d.party && d.party.did) ? String(d.party.did).split(':').pop() : '';
+    const did = (d.party && d.party.did) ? d.party.did : '';
     if (d.found && d.registered) {
-      let msg = '✓ 已在信任主数据登记 · DID: ' + short + ' · 双向绑定生效';
-      if (d.ca_linked) msg += ' · CA可信签发者';
-      msg += '　（该主体名下 ' + (d.records_count || 0) + ' 条存证）';
-      box.textContent = msg; box.className = 'field-hint ok';
-      if (d.party && d.party.did) injectField('主体DID', d.party.did);
+      const parts = ['✓ 已在信任主数据登记'];
+      if (did) parts.push('DID: ' + did);
+      if (d.ca_linked && d.ca_name) {
+        parts.push('🔗 由「' + d.ca_name + '」强绑定背书');
+        if (d.ca_issuer) parts.push('(issuer: ' + d.ca_issuer + ')');
+      } else {
+        let why = d.ca_reason === 'namespace_mismatch' ? 'DID 命名空间未对齐信任锚'
+                : (d.ca_reason && d.ca_reason.indexOf('issuer_untrusted') === 0 ? '背书签发机构不可信 / 已吊销'
+                : '未绑定授信 CA');
+        parts.push('⚠ 未建立 CA 强绑定：' + why);
+      }
+      parts.push('该主体名下 ' + (d.records_count || 0) + ' 条存证');
+      box.textContent = parts.join(' · '); box.className = 'field-hint ok';
+      if (did) injectField('主体DID', did);
     } else {
       box.textContent = '⚠ 未登记主体预警：本次存证有效，但该主体尚未纳入信任主数据，可信度待核实（仍可提交）';
       box.className = 'field-hint err';
@@ -2906,6 +2995,93 @@ function runTrace() {
     });
 }
 
+// 区域 -> 示意图归一化坐标（示意中国轮廓，非精确 GIS）
+var REGION_COORD = {
+  '华北': { x: 560, y: 250 }, '东北': { x: 735, y: 150 }, '华东': { x: 765, y: 380 },
+  '西南': { x: 425, y: 470 }, '华南': { x: 610, y: 545 }, '全国': { x: 560, y: 300 }
+};
+
+function renderTimeline(d) {
+  const stages = (d.stages || []).filter(function (s) { return s.key !== 'dispose'; });
+  const timed = stages.filter(function (s) { return s.ts; });
+  if (timed.length < 2) return '';
+  const W = 1000, H = 130, padL = 70, padR = 70;
+  const times = timed.map(function (s) { return Date.parse(s.ts); });
+  const tmin = Math.min.apply(null, times), tmax = Math.max.apply(null, times);
+  const span = (tmax - tmin) || 1;
+  function xOf(s) { return padL + (Date.parse(s.ts) - tmin) / span * (W - padL - padR); }
+  function fmtTs(ts) { if (!ts) return ''; return String(ts).replace('T', ' ').substring(0, 16); }
+  function fmtGap(a, b) {
+    if (!a || !b) return '';
+    const da = Date.parse(a), db2 = Date.parse(b);
+    if (isNaN(da) || isNaN(db2)) return '';
+    const h = Math.abs(db2 - da) / 3600000;
+    if (h < 1) return Math.round(h * 60) + 'm';
+    if (h < 48) return Math.round(h) + 'h';
+    return (h / 24).toFixed(1) + 'd';
+  }
+  let svg = '<svg class="tl-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="业务时间轴">';
+  svg += '<line x1="' + padL + '" y1="70" x2="' + (W - padR) + '" y2="70" class="tl-axis"/>';
+  svg += '<text x="' + padL + '" y="100" class="tl-tick">' + esc(fmtTs(timed[0].ts)) + '</text>';
+  svg += '<text x="' + (W - padR) + '" y="100" text-anchor="end" class="tl-tick">' + esc(fmtTs(timed[timed.length - 1].ts)) + '</text>';
+  let prev = null;
+  stages.forEach(function (s) {
+    if (!s.ts) return;
+    const x = xOf(s);
+    if (prev) {
+      const gap = fmtGap(prev.s.ts, s.ts);
+      const segCls = s.timeout ? 'timeout' : (prev.s.status === 'done' && s.status === 'done' ? 'ok' : 'gap');
+      svg += '<line x1="' + prev.x + '" y1="70" x2="' + x + '" y2="70" class="tl-seg ' + segCls + '"/>';
+      if (gap) svg += '<text x="' + ((prev.x + x) / 2) + '" y="56" text-anchor="middle" class="tl-gap">' + gap + '</text>';
+    }
+    const cls = 'tl-node ' + s.status + (s.timeout ? ' timeout' : '');
+    svg += '<circle cx="' + x + '" cy="70" r="9" class="' + cls + '"/>';
+    svg += '<text x="' + x + '" y="40" text-anchor="middle" class="tl-label">' + esc(s.label) + '</text>';
+    if (s.timeout) svg += '<text x="' + x + '" y="92" text-anchor="middle" class="tl-warn">SLA超时</text>';
+    prev = { x: x, s: s };
+  });
+  svg += '</svg>';
+  return '<div class="trace-sub"><div class="trace-sub-title">业务时间轴（按时间戳排布，连线标注 SLA 间隔，红色节点为超时）</div>' + svg + '</div>';
+}
+
+function renderMap(d) {
+  const stages = (d.stages || []).filter(function (s) { return s.region; });
+  if (!stages.length) return '';
+  // 按区域分组（保持首次出现顺序），区域即流向节点
+  const groups = []; const seen = {};
+  stages.forEach(function (s) {
+    if (!seen[s.region]) { seen[s.region] = { region: s.region, items: [] }; groups.push(seen[s.region]); }
+    seen[s.region].items.push(s);
+  });
+  const W = 1000, H = 620;
+  function coord(r) { return REGION_COORD[r] || REGION_COORD['全国']; }
+  let svg = '<svg class="map-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="业务地理流向图">';
+  // 简化中国轮廓（示意）
+  svg += '<path class="map-outline" d="M300,150 L520,118 L700,140 L805,205 L782,300 L865,360 L800,432 L702,470 L640,562 L560,602 L470,560 L420,482 L330,442 L300,360 L250,282 L300,150 Z"/>';
+  Object.keys(REGION_COORD).forEach(function (r) {
+    const c = REGION_COORD[r];
+    svg += '<circle cx="' + c.x + '" cy="' + c.y + '" r="4" class="map-grid"/>';
+    svg += '<text x="' + c.x + '" y="' + (c.y - 8) + '" text-anchor="middle" class="map-grid-label">' + esc(r) + '</text>';
+  });
+  for (let i = 1; i < groups.length; i++) {
+    const a = coord(groups[i - 1].region), b = coord(groups[i].region);
+    svg += '<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" class="map-route"/>';
+  }
+  groups.forEach(function (g) {
+    const c = coord(g.region);
+    const ok = g.items.every(function (s) { return s.status === 'done'; });
+    const timeout = g.items.some(function (s) { return s.timeout; });
+    const missing = g.items.some(function (s) { return s.status === 'missing'; });
+    const cls = 'map-node ' + (timeout ? 'timeout' : (missing ? 'missing' : (ok ? 'done' : 'partial')));
+    svg += '<circle cx="' + c.x + '" cy="' + c.y + '" r="13" class="' + cls + '"/>';
+    svg += '<text x="' + c.x + '" y="' + (c.y - 20) + '" text-anchor="middle" class="map-region">' + esc(g.region) + '</text>';
+    const labels = g.items.map(function (s) { return esc(s.label); }).join(' / ');
+    svg += '<text x="' + c.x + '" y="' + (c.y + 32) + '" text-anchor="middle" class="map-label">' + labels + '</text>';
+  });
+  svg += '</svg>';
+  return '<div class="trace-sub"><div class="trace-sub-title">业务地理流向（按阶段区域连线，节点颜色表状态：绿=完成 黄=部分 灰=缺失 红=超时/阻断）</div>' + svg + '</div>';
+}
+
 function renderTrace(d) {
   const box = document.getElementById('trace-result');
   if (!d.stages || !d.stages.length) {
@@ -2976,7 +3152,7 @@ function renderTrace(d) {
   if (d.summary.unregistered_parties && d.summary.unregistered_parties.length) {
     unreg = '<div class="trace-badge warn">● 链路含 ' + d.summary.unregistered_parties.length + ' 条未登记主体存证：可信度待核实</div>';
   }
-  box.innerHTML = flow + unreg + badge + riskHtml + cards;
+  box.innerHTML = flow + unreg + badge + renderTimeline(d) + renderMap(d) + riskHtml + cards;
 }
 
 const SAMPLE_DATA = {

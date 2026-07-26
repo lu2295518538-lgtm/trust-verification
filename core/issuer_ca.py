@@ -293,3 +293,36 @@ class CAStore:
 
 # 全局单例
 ca_store = CAStore()
+
+
+# ---------- 主体 DID 的 CA 强绑定解析 ----------
+def resolve_party_ca_link(did, store=None):
+    """把主体 DID 解析为「由哪个签发机构强绑定背书」。
+
+    仅当 DID 属于统一命名空间  did:trust:livestock:party:<issuer_id>:<short>
+    且 <issuer_id> 对应签发机构在信任锚内有效（或由 active 外部商业 CA 授信）时，
+    才视为强绑定。绑定关系直接编码进 DID 结构，而非名称子串软匹配。
+
+    返回 {ca_linked, ca_reason, ca_issuer, ca_name, ca_status, external_ca}
+    """
+    if not did or not isinstance(did, str):
+        return {"ca_linked": False, "ca_reason": "no_did",
+                "ca_issuer": None, "ca_name": None, "ca_status": None, "external_ca": None}
+    store = store or ca_store
+    p = did.split(":")
+    # 期望结构: did : trust : livestock : party : <issuer_id> : <short>
+    if len(p) < 6 or p[0] != "did" or p[1] != "trust" or p[2] != "livestock" or p[3] != "party":
+        # 命名空间不一致（例如遗留 did:chainmaker:party:* 或非 party DID）
+        return {"ca_linked": False, "ca_reason": "namespace_mismatch",
+                "ca_issuer": None, "ca_name": None, "ca_status": None, "external_ca": None}
+    issuer_id = p[4]
+    issuer_did_str = "did:trust:livestock:issuer:" + issuer_id
+    v = store.verify_issuer(issuer_did_str)
+    if v.get("trusted"):
+        cert = v.get("cert") or {}
+        name = (cert.get("subject", {}) or {}).get("name") or v.get("external_ca") or issuer_id
+        return {"ca_linked": True, "ca_reason": "strong_binding", "ca_issuer": issuer_did_str,
+                "ca_name": name, "ca_status": v.get("status"), "external_ca": v.get("external_ca")}
+    return {"ca_linked": False, "ca_reason": "issuer_untrusted:" + str(v.get("status", "unknown")),
+            "ca_issuer": issuer_did_str, "ca_name": None, "ca_status": v.get("status"),
+            "external_ca": v.get("external_ca")}
