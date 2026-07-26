@@ -3005,31 +3005,23 @@ function renderTimeline(d) {
   const stages = (d.stages || []).filter(function (s) { return s.key !== 'dispose'; });
   const timed = stages.filter(function (s) { return s.ts; });
   if (timed.length < 2) return '';
-  const W = 1000, H = 160, padL = 80, padR = 80;
-  const MIN_SPAN = 55; // 节点最小像素间距，防止标签重叠
+  const W = 1000, H = 220, padL = 90, padR = 90;
+  // 中文标签平均宽度约 13px/字，最长标签"出具检疫合格证"≈91px；留足余量
+  const MIN_SPAN = 110;
   const times = timed.map(function (s) { return Date.parse(s.ts); });
   const tmin = Math.min.apply(null, times), tmax = Math.max.apply(null, times);
   const rawSpan = (tmax - tmin) || 1;
-  // 计算实际可用跨度：如果原始时间跨度过小，强制拉伸到至少 MIN_SPAN * (N-1)
   const idealSpan = MIN_SPAN * (timed.length - 1);
   const span = Math.max(rawSpan, idealSpan);
   function xOf(s) { return padL + (Date.parse(s.ts) - tmin) / span * (W - padL - padR); }
-  // 防重叠：强制执行最小间距，超出的均匀重分布
   function spreadXs(arr) {
     const xs = arr.slice();
     for (let i = 1; i < xs.length; i++) {
-      if (xs[i] - xs[i - 1] < MIN_SPAN) {
-        xs[i] = xs[i - 1] + MIN_SPAN;
-      }
+      if (xs[i] - xs[i - 1] < MIN_SPAN) xs[i] = xs[i - 1] + MIN_SPAN;
     }
-    // 从右端回挤，确保不超出右边界
     for (let i = xs.length - 2; i >= 0; i--) {
-      if (xs[i + 1] - xs[i] < MIN_SPAN) {
-        xs[i] = xs[i + 1] - MIN_SPAN;
-      }
+      if (xs[i + 1] - xs[i] < MIN_SPAN) xs[i] = xs[i + 1] - MIN_SPAN;
     }
-    // 整体居中
-    const actualW = xs[xs.length - 1] - xs[0];
     const center = (padL + W - padR) / 2;
     const actualCenter = (xs[0] + xs[xs.length - 1]) / 2;
     const shift = center - actualCenter;
@@ -3045,17 +3037,17 @@ function renderTimeline(d) {
     if (h < 48) return Math.round(h) + 'h';
     return (h / 24).toFixed(1) + 'd';
   }
-  // 先计算所有 x 坐标再防重叠处理
   const rawXs = timed.map(function(s) { return xOf(s); });
   const xs = spreadXs(rawXs);
   const xMap = {};
   timed.forEach(function(s, i) { xMap[s.key || i] = xs[i]; });
 
   let svg = '<svg class="tl-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="业务时间轴">';
-  const axisY = 78;
+  const axisY = 110;  // 轴线下移，给上方标签+间隔留更多空间
   svg += '<line x1="' + padL + '" y1="' + axisY + '" x2="' + (W - padR) + '" y2="' + axisY + '" class="tl-axis"/>';
-  svg += '<text x="' + padL + '" y="112" class="tl-tick">' + esc(fmtTs(timed[0].ts)) + '</text>';
-  svg += '<text x="' + (W - padR) + '" y="112" text-anchor="end" class="tl-tick">' + esc(fmtTs(timed[timed.length - 1].ts)) + '</text>';
+  // 首尾时间戳放在轴线下方
+  svg += '<text x="' + padL + '" y="' + (axisY + 28) + '" class="tl-tick">' + esc(fmtTs(timed[0].ts)) + '</text>';
+  svg += '<text x="' + (W - padR) + '" y="' + (axisY + 28) + '" text-anchor="end" class="tl-tick">' + esc(fmtTs(timed[timed.length - 1].ts)) + '</text>';
 
   let prev = null;
   stages.forEach(function (s, idx) {
@@ -3067,17 +3059,15 @@ function renderTimeline(d) {
       svg += '<line x1="' + prev.x + '" y1="' + axisY + '" x2="' + x + '" y2="' + axisY + '" class="tl-seg ' + segCls + '"/>';
       if (gap) {
         const mx = (prev.x + x) / 2;
-        // 间隔标放在轴线上方偏左，避免和标签冲突
-        svg += '<text x="' + mx + '" y="' + (axisY - 14) + '" text-anchor="middle" class="tl-gap">' + gap + '</text>';
+        // 间隔标紧贴轴线上方
+        svg += '<text x="' + mx + '" y="' + (axisY - 12) + '" text-anchor="middle" class="tl-gap">' + gap + '</text>';
       }
     }
     const cls = 'tl-node ' + s.status + (s.timeout ? ' timeout' : '');
-    svg += '<circle cx="' + x + '" cy="' + axisY + '" r="9" class="' + cls + '"/>';
-    // 标签交错排列：奇数索引在上，偶数索引在下，避免左右相邻标签碰撞
-    const isTop = (idx % 2 === 0);
-    const labelY = isTop ? (axisY - 26) : (axisY + 30);
-    const anchor = 'middle';
-    svg += '<text x="' + x + '" y="' + labelY + '" text-anchor="' + anchor + '" class="tl-label">' + esc(s.label) + '</text>';
+    svg += '<circle cx="' + x + '" cy="' + axisY + '" r="10" class="' + cls + '"/>';
+    // 标签全部在轴线上方，不再交错到下方（避免和日期戳冲突）
+    const labelY = axisY - 30;
+    svg += '<text x="' + x + '" y="' + labelY + '" text-anchor="middle" class="tl-label">' + esc(s.label) + '</text>';
     if (s.timeout) svg += '<text x="' + x + '" y="' + (axisY + 46) + '" text-anchor="middle" class="tl-warn">SLA超时</text>';
     prev = { x: x, s: s };
   });

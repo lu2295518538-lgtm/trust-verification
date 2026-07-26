@@ -23,17 +23,33 @@ TEMPLATES = {
 }
 
 def extract_metadata(raw_data: str, data_type: str, is_structured: bool = True) -> dict:
+    import json as _json
     template = TEMPLATES.get(data_type, {"fields": [], "type": data_type})
     metadata = {"data_type": template["type"]}
-    lines = [l.strip() for l in raw_data.strip().split('\n') if l.strip()]
+    stripped = raw_data.strip()
 
-    for line in lines:
-        for sep in [': ', '：', ':']:
-            if sep in line:
-                parts = line.split(sep, 1)
-                if len(parts) == 2:
-                    metadata[parts[0].strip()] = parts[1].strip()
-                break
+    # ── 检测 JSON 格式输入（运输/交易等前端常以 JSON 提交）──
+    _json_obj = None
+    if stripped.startswith('{') or stripped.startswith('['):
+        try:
+            _json_obj = _json.loads(stripped)
+            if isinstance(_json_obj, dict):
+                metadata.update(_json_obj)
+            elif isinstance(_json_obj, list) and _json_obj:
+                metadata.update(_json_obj[0] if isinstance(_json_obj[0], dict) else {})
+        except (ValueError, TypeError):
+            _json_obj = None
+
+    # ── 回退：按行解析 key:value ──
+    if not _json_obj:
+        lines = [l.strip() for l in stripped.split('\n') if l.strip()]
+        for line in lines:
+            for sep in [': ', '：', ':']:
+                if sep in line:
+                    parts = line.split(sep, 1)
+                    if len(parts) == 2:
+                        metadata[parts[0].strip()] = parts[1].strip()
+                    break
 
     matched = sum(1 for f in template["fields"] if f in metadata)
     confidence = matched / len(template["fields"]) if template["fields"] else 0.5
