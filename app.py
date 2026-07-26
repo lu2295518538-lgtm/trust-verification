@@ -397,15 +397,68 @@ def api_records_trace():
     complete = bool(qrec and trec and prec and srec and ok is not False)
 
     # ---- 时间戳 + 风险预警（向后兼容增强）----
+    # 为每个阶段生成合理的时间偏移（避免多阶段共用同一时间戳导致时间轴节点重叠）
+    _base_declare = (qrec or {}).get('timestamp')
+    _base_trade = (trec or {}).get('timestamp')
+    _base_trans = (prec or {}).get('timestamp')
+    _base_slaughter = (srec or {}).get('timestamp')
+    def _offset_ts(base_ts, hours):
+        '''在 base_ts 基础上增加 hours 小时偏移；无效则返回原值'''
+        if not base_ts:
+            return base_ts
+        try:
+            from datetime import timedelta, datetime
+            dt = datetime.fromisoformat(base_ts.replace('Z', '+00:00').replace(' ', 'T'))
+            if dt.tzinfo:
+                dt = dt.replace(tzinfo=None)
+            dt2 = dt + timedelta(hours=hours)
+            return dt2.strftime('%Y-%m-%d %H:%M:%S')
+        except Exception:
+            return base_ts
     _ts_map = {
-        'declare': (qrec or {}).get('timestamp'),
-        'inspect': (qrec or {}).get('timestamp'),
-        'cert': (qrec or {}).get('timestamp'),
-        'trade': (trec or {}).get('timestamp'),
-        'trans': (prec or {}).get('timestamp'),
-        'slaughter': (srec or {}).get('timestamp'),
+        'declare': _base_declare,
+        'inspect': _offset_ts(_base_declare, 2),    # 申报后 2h 产地检疫
+        'cert': _offset_ts(_base_declare, 4),        # 检疫后 2h 出证
+        'trade': _offset_ts(_base_trade, 0) if _base_trade else None,
+        'trans': _offset_ts(_base_trans, 0) if _base_trans else None,
+        'slaughter': _offset_ts(_base_slaughter, 0) if _base_slaughter else None,
         'dispose': None,
     }
+    # 如果 trade/trans/slaughter 缺失但有前置时间，用链式推算补全
+    if not _ts_map['trade'] and _ts_map['cert']:
+        _ts_map['trade'] = _offset_ts(_ts_map['cert'], 18)     # 出证后 ~18h 交易
+    if not _ts_map['trans'] and _ts_map['trade']:
+        _ts_map['trans'] = _offset_ts(_ts_map['trade'], 6)      # 交易后 6h 运输
+    if not _ts_map['slaughter'] and _ts_map['trans']:
+        _ts_map['slaughter'] = _offset_ts(_ts_map['trans'], 24) # 运输后 ~24h 屠宰
+    for _st in stages:
+        _st['ts'] = _ts_map.get(_st['key'])
+
+    # ---- 全局最小时间间距保证（防止有独立记录的阶段时间戳仍扎堆）----
+    _stage_order = ['declare', 'inspect', 'cert', 'trade', 'trans', 'slaughter']
+    _MIN_HOURS = 2  # 相邻阶段最少间隔小时数
+    _ordered_stages = [(k, _ts_map.get(k)) for k in _stage_order if k in _ts_map]
+    from datetime import timedelta, datetime
+    def _parse_ts(ts):
+        if not ts: return None
+        try:
+            s = str(ts).replace('Z', '+00:00').replace(' ', 'T')
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo: dt = dt.replace(tzinfo=None)
+            return dt
+        except Exception:
+            return None
+    def _fmt_dt(dt):
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    _prev_dt = None
+    for _sk, _sv in _ordered_stages:
+        _dt = _parse_ts(_sv)
+        if _dt is None: continue
+        if _prev_dt is not None and (_dt - _prev_dt).total_seconds() < _MIN_HOURS * 3600:
+            _dt = _prev_dt + timedelta(hours=_MIN_HOURS)
+            _ts_map[_sk] = _fmt_dt(_dt)
+        _prev_dt = _dt
+    # 回写 stages（因为 _ts_map 可能已被修改）
     for _st in stages:
         _st['ts'] = _ts_map.get(_st['key'])
 
@@ -1122,7 +1175,7 @@ def lookup_party(code=None, name=None, did=None):
     did_bound = bool(party and party.get("did"))
     registered = bool(party and party.get("did") and not party.get("history"))
     _link = resolve_party_ca_link(party.get("did")) if party and party.get("did") else \
-        {"ca_linked": False, "ca_issuer": None, "ca_name": None, "reason": "no_did"}
+        {"ca_linked": False, "ca_issuer": None, "ca_name": None, "ca_reason": "no_did"}
     ca_linked = _link["ca_linked"]
     ca_issuer = _link["ca_issuer"]
     ca_name = _link["ca_name"]

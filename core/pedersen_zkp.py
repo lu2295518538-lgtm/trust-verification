@@ -165,4 +165,40 @@ def normalize_metadata(metadata, did=""):
     if not isinstance(content.get("tags"), list):
         content["tags"] = []
 
-    return {"basic": basic, "ownership": ownership, "content": content}
+    # ---- 可选 inspection 模块（移动端现场出证）：仅输入含 inspection 时才纳入 ----
+    norm = {"basic": basic, "ownership": ownership, "content": content}
+
+    def _f(func, val):
+        try:
+            return func(val)
+        except (TypeError, ValueError):
+            return None
+
+    insp = metadata.get("inspection") if isinstance(metadata.get("inspection"), dict) else {}
+    if insp:
+        from datetime import datetime, timezone
+        inspection = {}
+        gps = insp.get("gps") if isinstance(insp.get("gps"), dict) else {}
+        lat = _f(float, gps.get("lat") if gps.get("lat") is not None else flat.get("lat"))
+        lng = _f(float, gps.get("lng") if gps.get("lng") is not None else flat.get("lng"))
+        if lat is not None and lng is not None:
+            inspection["gps"] = {
+                "lat": lat, "lng": lng,
+                "accuracy": _f(float, gps.get("accuracy")),
+                "ts": gps.get("ts") or datetime.now(timezone.utc).isoformat(),
+            }
+        vet = insp.get("vet") if isinstance(insp.get("vet"), dict) else {}
+        vname = (vet.get("name") or flat.get("vet_name") or "").strip()
+        vid = (vet.get("id") or flat.get("vet_id") or "").strip()
+        if vname or vid:
+            inspection["vet"] = {"name": vname, "id": vid}
+        result = (insp.get("result") or flat.get("result") or "").strip()
+        if result:
+            inspection["result"] = result
+        note = (insp.get("note") or flat.get("note") or "").strip()
+        if note:
+            inspection["note"] = note
+        if inspection:
+            norm["inspection"] = inspection
+
+    return norm

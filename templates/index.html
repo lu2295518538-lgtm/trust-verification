@@ -1191,7 +1191,7 @@ body {
 .tl-node.blocked, .tl-node.timeout { fill: #dc2626; stroke: #dc2626; }
 .tl-label { font-size: 13px; fill: #16241c; font-weight: 600; }
 .tl-tick { font-size: 12px; fill: #6b7a72; }
-.tl-gap { font-size: 12px; fill: #a16207; font-weight: 600; }
+.tl-gap { font-size: 11px; fill: #a16207; font-weight: 600; }
 .tl-warn { font-size: 11px; fill: #dc2626; font-weight: 700; }
 .map-outline { fill: rgba(52,168,83,.06); stroke: #bcd4c2; stroke-width: 2; }
 .map-grid { fill: #dbe7df; }
@@ -3005,11 +3005,36 @@ function renderTimeline(d) {
   const stages = (d.stages || []).filter(function (s) { return s.key !== 'dispose'; });
   const timed = stages.filter(function (s) { return s.ts; });
   if (timed.length < 2) return '';
-  const W = 1000, H = 130, padL = 70, padR = 70;
+  const W = 1000, H = 160, padL = 80, padR = 80;
+  const MIN_SPAN = 55; // 节点最小像素间距，防止标签重叠
   const times = timed.map(function (s) { return Date.parse(s.ts); });
   const tmin = Math.min.apply(null, times), tmax = Math.max.apply(null, times);
-  const span = (tmax - tmin) || 1;
+  const rawSpan = (tmax - tmin) || 1;
+  // 计算实际可用跨度：如果原始时间跨度过小，强制拉伸到至少 MIN_SPAN * (N-1)
+  const idealSpan = MIN_SPAN * (timed.length - 1);
+  const span = Math.max(rawSpan, idealSpan);
   function xOf(s) { return padL + (Date.parse(s.ts) - tmin) / span * (W - padL - padR); }
+  // 防重叠：强制执行最小间距，超出的均匀重分布
+  function spreadXs(arr) {
+    const xs = arr.slice();
+    for (let i = 1; i < xs.length; i++) {
+      if (xs[i] - xs[i - 1] < MIN_SPAN) {
+        xs[i] = xs[i - 1] + MIN_SPAN;
+      }
+    }
+    // 从右端回挤，确保不超出右边界
+    for (let i = xs.length - 2; i >= 0; i--) {
+      if (xs[i + 1] - xs[i] < MIN_SPAN) {
+        xs[i] = xs[i + 1] - MIN_SPAN;
+      }
+    }
+    // 整体居中
+    const actualW = xs[xs.length - 1] - xs[0];
+    const center = (padL + W - padR) / 2;
+    const actualCenter = (xs[0] + xs[xs.length - 1]) / 2;
+    const shift = center - actualCenter;
+    return xs.map(function(v) { return v + shift; });
+  }
   function fmtTs(ts) { if (!ts) return ''; return String(ts).replace('T', ' ').substring(0, 16); }
   function fmtGap(a, b) {
     if (!a || !b) return '';
@@ -3020,24 +3045,40 @@ function renderTimeline(d) {
     if (h < 48) return Math.round(h) + 'h';
     return (h / 24).toFixed(1) + 'd';
   }
+  // 先计算所有 x 坐标再防重叠处理
+  const rawXs = timed.map(function(s) { return xOf(s); });
+  const xs = spreadXs(rawXs);
+  const xMap = {};
+  timed.forEach(function(s, i) { xMap[s.key || i] = xs[i]; });
+
   let svg = '<svg class="tl-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="业务时间轴">';
-  svg += '<line x1="' + padL + '" y1="70" x2="' + (W - padR) + '" y2="70" class="tl-axis"/>';
-  svg += '<text x="' + padL + '" y="100" class="tl-tick">' + esc(fmtTs(timed[0].ts)) + '</text>';
-  svg += '<text x="' + (W - padR) + '" y="100" text-anchor="end" class="tl-tick">' + esc(fmtTs(timed[timed.length - 1].ts)) + '</text>';
+  const axisY = 78;
+  svg += '<line x1="' + padL + '" y1="' + axisY + '" x2="' + (W - padR) + '" y2="' + axisY + '" class="tl-axis"/>';
+  svg += '<text x="' + padL + '" y="112" class="tl-tick">' + esc(fmtTs(timed[0].ts)) + '</text>';
+  svg += '<text x="' + (W - padR) + '" y="112" text-anchor="end" class="tl-tick">' + esc(fmtTs(timed[timed.length - 1].ts)) + '</text>';
+
   let prev = null;
-  stages.forEach(function (s) {
+  stages.forEach(function (s, idx) {
     if (!s.ts) return;
-    const x = xOf(s);
-    if (prev) {
+    const x = xMap[s.key] !== undefined ? xMap[s.key] : xOf(s);
+    if (prev !== null) {
       const gap = fmtGap(prev.s.ts, s.ts);
       const segCls = s.timeout ? 'timeout' : (prev.s.status === 'done' && s.status === 'done' ? 'ok' : 'gap');
-      svg += '<line x1="' + prev.x + '" y1="70" x2="' + x + '" y2="70" class="tl-seg ' + segCls + '"/>';
-      if (gap) svg += '<text x="' + ((prev.x + x) / 2) + '" y="56" text-anchor="middle" class="tl-gap">' + gap + '</text>';
+      svg += '<line x1="' + prev.x + '" y1="' + axisY + '" x2="' + x + '" y2="' + axisY + '" class="tl-seg ' + segCls + '"/>';
+      if (gap) {
+        const mx = (prev.x + x) / 2;
+        // 间隔标放在轴线上方偏左，避免和标签冲突
+        svg += '<text x="' + mx + '" y="' + (axisY - 14) + '" text-anchor="middle" class="tl-gap">' + gap + '</text>';
+      }
     }
     const cls = 'tl-node ' + s.status + (s.timeout ? ' timeout' : '');
-    svg += '<circle cx="' + x + '" cy="70" r="9" class="' + cls + '"/>';
-    svg += '<text x="' + x + '" y="40" text-anchor="middle" class="tl-label">' + esc(s.label) + '</text>';
-    if (s.timeout) svg += '<text x="' + x + '" y="92" text-anchor="middle" class="tl-warn">SLA超时</text>';
+    svg += '<circle cx="' + x + '" cy="' + axisY + '" r="9" class="' + cls + '"/>';
+    // 标签交错排列：奇数索引在上，偶数索引在下，避免左右相邻标签碰撞
+    const isTop = (idx % 2 === 0);
+    const labelY = isTop ? (axisY - 26) : (axisY + 30);
+    const anchor = 'middle';
+    svg += '<text x="' + x + '" y="' + labelY + '" text-anchor="' + anchor + '" class="tl-label">' + esc(s.label) + '</text>';
+    if (s.timeout) svg += '<text x="' + x + '" y="' + (axisY + 46) + '" text-anchor="middle" class="tl-warn">SLA超时</text>';
     prev = { x: x, s: s };
   });
   svg += '</svg>';
