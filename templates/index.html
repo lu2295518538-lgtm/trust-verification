@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>畜牧全产业链数据可信确权方案</title>
@@ -696,7 +699,7 @@ body {
 .rs-arrow{color:var(--ink-3);font-size:12px;margin-left:8px;transition:transform .2s;}
 .rich-select.open .rs-arrow{transform:rotate(180deg);}
 
-.rich-select-dropdown{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--card);border:1.5px solid var(--border);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.08);z-index:200;max-height:420px;display:flex;flex-direction:column;overflow:hidden;}
+.rich-select-dropdown{position:fixed;z-index:9999;background:var(--card);border:1.5px solid var(--border);border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.18),0 4px 12px rgba(0,0,0,.08);z-index:200;max-height:420px;display:flex;flex-direction:column;overflow:hidden;}
 .rs-search-box{padding:10px 10px 8px;border-bottom:1px solid var(--border);}
 .rs-input{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;background:var(--bg);color:var(--ink);outline:none;box-sizing:border-box;transition:border-color .15s;}
 .rs-input:focus{border-color:var(--primary);box-shadow:0 0 0 2px rgba(99,102,241,.1);}
@@ -705,11 +708,11 @@ body {
 .rs-list{overflow-y:auto;padding:6px;flex:1;}
 .rs-group-title{font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:.8px;padding:10px 12px 6px;position:sticky;top:0;background:var(--card);z-index:1;border-bottom:1px solid rgba(0,0,0,.05);}
 /* ---- 核心修复：选项卡片化 ---- */
-.rs-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px;transition:all .12s ease;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.45);margin:2px 0;position:relative;min-height:44px;}
+.rs-item{display:flex!important;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px;transition:all .12s ease;border:1px solid rgba(0,0,0,.08);background:#fff;margin:2px 0;position:relative;min-height:44px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
 .rs-item::before{content:'';position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:0 3px 3px 0;background:transparent;transition:background .12s;}
-.rs-item:hover{background:rgba(99,102,241,.07);border-color:rgba(99,102,241,.18);transform:translateX(1px);}
+.rs-item:hover{background:#eef2ff!important;border-color:rgba(99,102,241,.35)!important;transform:translateX(2px)!important;box-shadow:0 2px 8px rgba(99,102,241,.15)!important;}
 .rs-item:hover::before{background:rgba(99,102,241,.4);}
-.rs-item.active{background:rgba(99,102,241,.1);border-color:rgba(99,102,241,.35);transform:translateX(2px);}
+.rs-item.active{background:#e0e7ff!important;border-color:rgba(99,102,241,.5)!important;transform:translateX(3px)!important;box-shadow:0 2px 10px rgba(99,102,241,.2)!important;}
 .rs-item.active::before{background:var(--primary);}
 .rs-item.selected{background:rgba(16,185,129,.06);border-color:rgba(16,185,129,.3);}
 .rs-item.selected::before{background:#10b981;}
@@ -3706,10 +3709,15 @@ function toggleRichSelect() {
   var dropdown = document.getElementById('rs-dropdown');
   var container = document.getElementById('verify-did');
   var isOpen = dropdown.style.display !== 'none';
-  
+
   if (isOpen) {
     closeRichSelect();
   } else {
+    // 动态计算 fixed 定位
+    var rect = container.getBoundingClientRect();
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    dropdown.style.width = Math.max(rect.width, 280) + 'px';
     dropdown.style.display = 'flex';
     container.classList.add('open');
     document.getElementById('rs-search').focus();
@@ -3719,6 +3727,15 @@ function toggleRichSelect() {
       var sel = dropdown.querySelector('.rs-item.selected');
       if (sel) sel.scrollIntoView({block:'nearest'});
     }
+    // 注册 resize 重定位
+    window._rsResizeHandler = window._rsResizeHandler || function() {
+      if (dropdown.style.display !== 'none') {
+        var r = container.getBoundingClientRect();
+        dropdown.style.top = (r.bottom + 4) + 'px';
+        dropdown.style.left = r.left + 'px';
+        dropdown.style.width = Math.max(r.width, 280) + 'px';
+      }
+    };
   }
 }
 
@@ -3726,6 +3743,9 @@ function closeRichSelect() {
   var dropdown = document.getElementById('rs-dropdown');
   var container = document.getElementById('verify-did');
   dropdown.style.display = 'none';
+  dropdown.style.top = '';
+  dropdown.style.left = '';
+  dropdown.style.width = '';
   container.classList.remove('open');
   _rsActiveIndex = -1;
 }
@@ -3771,6 +3791,12 @@ document.addEventListener('click', function(e) {
   if (container && !container.contains(e.target)) {
     closeRichSelect();
   }
+});
+
+
+// 窗口resize时重定位下拉框
+window.addEventListener('resize', function() {
+  if (window._rsResizeHandler) window._rsResizeHandler();
 });
 
 </script>
