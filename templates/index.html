@@ -896,18 +896,12 @@ body {
       <div class="section-desc">指纹 · 承诺 · 签名 · 链上存证</div>
     </div>
 
-    <div class="field">
-      <label class="field-label" for="verify-did">选择数据记录</label>
-      <div id="verify-did" class="rich-select" tabindex="0">
-        <div class="rich-select-trigger" id="rs-trigger" onclick="toggleRichSelect()">
-          <span class="rs-placeholder" id="rs-placeholder">— 搜索或选择记录 —</span>
-          <span class="rs-arrow">▾</span>
-        </div>
-        <div class="rich-select-dropdown" id="rs-dropdown" style="display:none;">
-          <div class="rs-search-box">
-            <input type="text" id="rs-search" class="rs-input" placeholder="搜索编号 / 动物 / 地点..." oninput="filterRichSelect(this.value)" onkeydown="handleRsKeydown(event)">
-          </div>
-          <div class="rs-list" id="rs-list"></div>
+            <div class="field">
+          <label class="field-label" for="verify-did">选择数据记录</label>
+          <select id="verify-did" class="select" onchange="onRecordSelect()">
+            <option value="">— 搜索或选择记录 —</option>
+          </select>
+          <input type="text" id="rs-search-inline" class="input" placeholder="输入关键词过滤列表..." oninput="filterRecordSelect(this.value)" style="margin-top:6px;font-size:12px;padding:6px 10px;">
         </div>
         <input type="hidden" id="rs-value" value="">
       </div>
@@ -2431,7 +2425,7 @@ async function loadRecords(page) {
         populateRichSelect(arr);
         if (arr.length > 0 && !currentDataDID) {
           currentDataDID = arr[0].data_did;
-          setRichSelectValue(currentDataDID);
+          // native select handles value via renderNativeSelectOptions
         }
       }).catch(function() {});
     }
@@ -3579,7 +3573,84 @@ function extractRecordLabel(rec) {
 }
 
 function getTypeLabel(type) {
-  var map = { transport:'\u8fd0\u8f93', quarantine:'\u68c0\u75ab', slaughter:'\u5c4e\u5bb6', transaction:'\u4ea4\u6613', declare:'\u7533\u62a5' };
+  var map = { transport:'\u8fd0\u8f93', quarantine:'\u68c0\u75ab', slaughter:'\u5c4e\u5bb6', transaction:'\u4ea4\u6613', declare:'\u7533\u62a5' }
+
+// ===== Native Select (optgroup-style) Renderer =====
+function renderNativeSelectOptions(records) {
+  var sel = document.getElementById('verify-did');
+  if (!sel) return;
+
+  var groups = {};
+  var groupOrder = ['declare','quarantine','transport','transaction','slaughter'];
+  records.forEach(function(rec) {
+    var t = rec.data_type || 'other';
+    if (!groups[t]) groups[t] = [];
+    groups[t].push(rec);
+  });
+
+  var html = '<option value="">\u2014 \u641c\u7d22\u6216\u9009\u62e9\u8bb0\u5f55 \u2014</option>';
+  groupOrder.forEach(function(t) {
+    if (groups[t] && groups[t].length) {
+      html += '<optgroup label="' + getTypeLabel(t) + ' (' + groups[t].length + ')">';
+      groups[t].forEach(function(rec) {
+        var L = rec._rsLabel;
+        var text = L.main;
+        if (L.sub) text += ' \u2014 ' + L.sub;
+        if (L.ts) text += ' | ' + L.ts;
+        html += '<option value="' + esc(rec.data_did) + '">' + esc(text) + '</option>';
+      });
+      html += '</optgroup>';
+    }
+  });
+
+  // remaining groups
+  Object.keys(groups).forEach(function(t) {
+    if (groupOrder.indexOf(t) === -1 && groups[t].length) {
+      html += '<optgroup label="' + getTypeLabel(t) + ' (' + groups[t].length + ')">';
+      groups[t].forEach(function(rec) {
+        var L = rec._rsLabel;
+        var text = L.main;
+        if (L.sub) text += ' \u2014 ' + L.sub;
+        html += '<option value="' + esc(rec.data_did) + '">' + esc(text) + '</option>';
+      });
+      html += '</optgroup>';
+    }
+  });
+
+  sel.innerHTML = html;
+  if (currentDataDID) sel.value = currentDataDID;
+}
+
+function filterRecordSelect(query) {
+  query = (query || '').trim().toLowerCase();
+  var sel = document.getElementById('verify-did');
+  if (!sel) return;
+  var options = sel.querySelectorAll('option');
+  var hasVisibleGroup = {};
+
+  for (var i = 0; i < options.length; i++) {
+    var opt = options[i];
+    if (opt.value === '') { opt.style.display = ''; continue; }
+    if (!query) { opt.style.display = ''; continue; }
+    var txt = (opt.textContent || opt.innerText || '').toLowerCase();
+    var m = txt.indexOf(query) !== -1;
+    opt.style.display = m ? '' : 'none';
+    if (m) {
+      var p = opt.parentElement;
+      if (p && p.tagName === 'OPTGROUP') hasVisibleGroup[p.label] = true;
+    }
+  }
+
+  var gs = sel.querySelectorAll('optgroup');
+  for (var j = 0; j < gs.length; j++) {
+    gs[j].style.display = hasVisibleGroup[gs[j].label] ? '' : 'none';
+  }
+}
+
+function onRecordSelect() {
+  currentDataDID = (document.getElementById('verify-did').value || '');
+}
+;
   return map[type] || type;
 }
 
@@ -3593,10 +3664,7 @@ function populateRichSelect(recordList) {
     var label = extractRecordLabel(rec);
     return Object.assign({}, rec, { _rsLabel: label });
   });
-  _rsFilteredRecords = _rsAllRecords.slice();
-  renderRichSelectList();
-  var val = document.getElementById('rs-value').value;
-  if (val) setRichSelectValue(val);
+  renderNativeSelectOptions(_rsAllRecords);
 }
 
 function filterRichSelect(query) {
