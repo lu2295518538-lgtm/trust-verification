@@ -686,6 +686,50 @@ body {
   .wm-zone { grid-template-columns: 1fr; }
   .auth-row { flex-wrap: wrap; }
   .auth-row input { max-width: 100%; }
+
+/* ===== Rich Select (Searchable Record Picker) ===== */
+.rich-select { position:relative; width:100%; min-height:38px; background:var(--card); border:1px solid var(--border); border-radius:6px; cursor:text; transition:border-color .15s; }
+.rich-select:focus-within { border-color:var(--primary); box-shadow:0 0 0 2px rgba(99,102,241,.12); }
+.rich-select-trigger { display:flex; align-items:center; justify-content:space-between; padding:7px 10px; cursor:pointer; user-select:none; min-height:24px; }
+.rs-placeholder { font-size:13px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.rs-placeholder.empty { color:var(--ink-3); }
+.rs-arrow { color:var(--ink-3); font-size:11px; margin-left:8px; transition:transform .2s; }
+.rich-select.open .rs-arrow { transform:rotate(180deg); }
+
+.rich-select-dropdown { position:absolute; top:calc(100% + 4px); left:0; right:0; background:var(--card); border:1px solid var(--border); border-radius:8px; box-shadow:0 8px 30px rgba(0,0,0,.14),0 2px 8px rgba(0,0,0,.06); z-index:200; max-height:380px; display:flex; flex-direction:column; overflow:hidden; }
+.rs-search-box { padding:8px 8px 0; border-bottom:1px solid var(--border); }
+.rs-input { width:100%; padding:7px 10px; border:1px solid var(--border); border-radius:5px; font-size:13px; background:var(--bg); color:var(--ink); outline:none; box-sizing:border-box; }
+.rs-input:focus { border-color:var(--primary); }
+.rs-input::placeholder { color:var(--ink-3); }
+
+.rs-list { overflow-y:auto; padding:4px; flex:1; }
+.rs-group-title { font-size:11px; font-weight:600; color:var(--ink-3); text-transform:uppercase; letter-spacing:.5px; padding:8px 10px 4px; position:sticky; top:0; background:var(--card); z-index:1; }
+.rs-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:5px; cursor:pointer; font-size:13px; transition:background .1s; border:1px solid transparent; }
+.rs-item:hover { background:rgba(99,102,241,.06); }
+.rs-item.active { background:rgba(99,102,241,.1); border-color:rgba(99,102,241,.25); }
+.rs-item.selected { background:rgba(16,185,129,.08); border-color:rgba(16,185,129,.3); }
+.rs-type-badge { font-size:10px; font-weight:600; padding:2px 6px; border-radius:4px; white-space:nowrap; flex-shrink:0; min-width:52px; text-align:center; }
+.rs-type-badge.transport { background:#eef2ff; color:#4338ca; }
+.rs-type-badge.quarantine { background:#ecfdf5; color:#047857; }
+.rs-type-badge.slaughter { background:#fef2f2; color:#b91c1c; }
+.rs-type-badge.transaction { background:#fff7ed; color:#c2410c; }
+.rs-type-badge.declare { background:#faf5ff; color:#7c3aed; }
+.rs-type-badge.default { background:var(--surface); color:var(--ink-2); }
+.rs-info { flex:1; min-width:0; }
+.rs-main { font-weight:500; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rs-sub { font-size:11px; color:var(--ink-3); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rs-time { font-size:11px; color:var(--ink-3); flex-shrink:0; }
+
+.rs-empty { text-align:center; padding:20px; color:var(--ink-3); font-size:13px; }
+.rs-count { text-align:center; padding:6px; font-size:11px; color:var(--ink-3); border-top:1px solid var(--border); }
+
+@media(max-width:768px) {
+  .rich-select-dropdown { max-height:300px; }
+  .rs-item { padding:10px 8px; }
+  .rs-main { font-size:13px; }
+  .rs-sub { font-size:11px; }
+}
+
 }
 </style>
 </head>
@@ -845,9 +889,19 @@ body {
 
     <div class="field">
       <label class="field-label" for="verify-did">选择数据记录</label>
-      <select id="verify-did" class="select">
-        <option value="">— 请先提交数据上链 —</option>
-      </select>
+      <div id="verify-did" class="rich-select" tabindex="0">
+        <div class="rich-select-trigger" id="rs-trigger" onclick="toggleRichSelect()">
+          <span class="rs-placeholder" id="rs-placeholder">— 搜索或选择记录 —</span>
+          <span class="rs-arrow">▾</span>
+        </div>
+        <div class="rich-select-dropdown" id="rs-dropdown" style="display:none;">
+          <div class="rs-search-box">
+            <input type="text" id="rs-search" class="rs-input" placeholder="搜索编号 / 动物 / 地点..." oninput="filterRichSelect(this.value)" onkeydown="handleRsKeydown(event)">
+          </div>
+          <div class="rs-list" id="rs-list"></div>
+        </div>
+        <input type="hidden" id="rs-value" value="">
+      </div>
     </div>
 
     <div class="formula">
@@ -2358,30 +2412,20 @@ async function loadRecords(page) {
         '<td style="font-family:inherit;"><button class="btn btn-ghost btn-sm" onclick="selectRecord(\'' + did + '\')">据此验证</button> <button class="btn btn-ghost btn-sm" onclick="revealNonce(\'' + did + '\')">揭示</button></td>' +
         '</tr>';
     }).join('');
-    select.innerHTML = '<option value="">— 选择记录 —</option>' + records.map(rec => '<option value="' + rec.data_did + '">' + (rec.data_did || '').substring(0, 22) + '…</option>').join('');
-    // 下拉框补充全部记录（不仅当前页）
-    if (allRecordsForDropdown && allRecordsForDropdown.length > records.length) {
-      const existing = new Set(records.map(r => r.data_did));
-      const extra = allRecordsForDropdown.filter(r => !existing.has(r.data_did));
-      if (extra.length > 0) {
-        select.innerHTML = '<option value="">— 选择记录 (' + allRecordsForDropdown.length + '条) —</option>'
-          + allRecordsForDropdown.map(rec => '<option value="' + rec.data_did + '">[' + rec.data_type + '] ' + (rec.data_did || '').substring(0, 22) + '…</option>').join('');
-      }
-    }
-    // 首次加载或缓存为空时，异步拉取全部记录填充下拉框
+    // ---- Rich Select: populate searchable dropdown ----
+    populateRichSelect(allRecordsForDropdown || records);
+    // Async fetch all records for rich-select if not yet loaded
     if (!allRecordsForDropdown) {
-      fetch('/api/records').then(function(r) { return r.json(); }).then(function(all) {
-        allRecordsForDropdown = Array.isArray(all) ? all : [];
-        if (allRecordsForDropdown.length > records.length) {
-          const existing = new Set(records.map(function(r) { return r.data_did; }));
-          select.innerHTML = '<option value="">— 选择记录 (' + allRecordsForDropdown.length + '条) —</option>'
-            + allRecordsForDropdown.map(function(rec) { return '<option value="' + rec.data_did + '">[' + rec.data_type + '] ' + (rec.data_did || '').substring(0, 22) + '…</option>'; }).join('');
-          // 保持之前选中的值
-          if (currentDataDID) select.value = currentDataDID;
+      fetch('/api/records?per_page=10000').then(function(r) { return r.json(); }).then(function(all) {
+        var arr = Array.isArray(all) ? (all.records || all) : [];
+        allRecordsForDropdown = arr;
+        populateRichSelect(arr);
+        if (arr.length > 0 && !currentDataDID) {
+          currentDataDID = arr[0].data_did;
+          setRichSelectValue(currentDataDID);
         }
       }).catch(function() {});
     }
-    if (records.length > 0 && !currentDataDID) { currentDataDID = records[0].data_did; select.value = currentDataDID; }
     renderPagination();
     updateBatchBar();
   } catch (e) { console.error(e); }
@@ -3468,6 +3512,261 @@ async function verifyUploaded() {
 }
 
 init();
+
+// ===== Rich Select Component =====
+var _rsAllRecords = [];
+var _rsFilteredRecords = [];
+var _rsActiveIndex = -1;
+
+function extractRecordLabel(rec) {
+  try {
+    var metaStr = rec.metadata || '{}';
+    var meta = typeof metaStr === 'string' ? JSON.parse(metaStr) : (metaStr || {});
+    var biz = meta.metadata || meta;
+    if (typeof biz === 'string') try { biz = JSON.parse(biz); } catch(e) {}
+    if (typeof biz !== 'object' || !biz) biz = {};
+    
+    var type = rec.data_type || 'unknown';
+    var mainText = '';
+    var subText = '';
+    
+    if (type === 'transport') {
+      mainText = biz['运输编号'] || biz['编号'] || '';
+      subText = '';
+      var parts = [];
+      if (biz['动物种类']) parts.push(biz['动物种类']);
+      if (biz['数量']) parts.push(biz['数量'] + '头');
+      if (parts.length) subText += parts.join(' · ');
+      var route = '';
+      if (biz['起运地'] && biz['目的地']) route = biz['起运地'] + ' \u2192 ' + biz['目的地'];
+      else if (biz['起运地']) route = '\u4ece ' + biz['起运地'];
+      if (route) subText += (subText ? ' | ' : '') + route;
+    } else if (type === 'quarantine') {
+      mainText = biz['检疫证号'] || biz['证书编号'] || biz['编号'] || '';
+      var qParts = [];
+      if (biz['动物种类']) qParts.push(biz['动物种类']);
+      if (biz['数量']) qParts.push(biz['数量'] + '头');
+      if (qParts.length) subText = qParts.join(' · ');
+    } else if (type === 'slaughter') {
+      mainText = biz['屠宰证号'] || biz['编号'] || '';
+      subText = biz['动物种类'] || '';
+    } else if (type === 'transaction') {
+      mainText = biz['交易单号'] || biz['编号'] || '';
+      subText = biz['动物种类'] || '';
+    } else if (type === 'declare') {
+      mainText = biz['申报号'] || biz['编号'] || '';
+      subText = biz['动物种类'] || '';
+    }
+    
+    if (!mainText) mainText = (rec.data_did || '').replace('did:trust:livestock:data:', '').substring(0, 12);
+    
+    var ts = rec.timestamp || '';
+    if (ts) ts = ts.substring(0, 16).replace('T', ' ');
+    
+    return { type: type, main: mainText, sub: subText, ts: ts, did: rec.data_did };
+  } catch(e) {
+    return { type: rec.data_type || '?', main: (rec.data_did || '').substring(0, 16), sub: '', ts: '', did: rec.data_did };
+  }
+}
+
+function getTypeLabel(type) {
+  var map = { transport:'\u8fd0\u8f93', quarantine:'\u68c0\u75ab', slaughter:'\u5c4e\u5bb6', transaction:'\u4ea4\u6613', declare:'\u7533\u62a5' };
+  return map[type] || type;
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function populateRichSelect(recordList) {
+  _rsAllRecords = (recordList || []).map(function(rec) {
+    var label = extractRecordLabel(rec);
+    return Object.assign({}, rec, { _rsLabel: label });
+  });
+  _rsFilteredRecords = _rsAllRecords.slice();
+  renderRichSelectList();
+  var val = document.getElementById('rs-value').value;
+  if (val) setRichSelectValue(val);
+}
+
+function filterRichSelect(query) {
+  query = (query || '').trim().toLowerCase();
+  if (!query) {
+    _rsFilteredRecords = _rsAllRecords.slice();
+  } else {
+    _rsFilteredRecords = _rsAllRecords.filter(function(rec) {
+      var L = rec._rsLabel;
+      var haystack = [L.type, L.main, L.sub, rec.data_did].join(' ').toLowerCase();
+      return haystack.indexOf(query) !== -1;
+    });
+  }
+  _rsActiveIndex = -1;
+  renderRichSelectList();
+}
+
+function renderRichSelectList() {
+  var listEl = document.getElementById('rs-list');
+  if (!listEl) return;
+  
+  if (_rsFilteredRecords.length === 0) {
+    listEl.innerHTML = '<div class="rs-empty">\u65e0\u5339\u914d\u8bb0\u5f55</div>';
+    return;
+  }
+  
+  var groups = {};
+  var groupOrder = ['declare','quarantine','transport','transaction','slaughter'];
+  _rsFilteredRecords.forEach(function(rec) {
+    var t = rec.data_type || 'other';
+    if (!groups[t]) groups[t] = [];
+    groups[t].push(rec);
+  });
+  
+  var currentValue = document.getElementById('rs-value').value;
+  var h = '';
+  
+  groupOrder.forEach(function(t) {
+    if (groups[t]) {
+      h += renderGroup(t, groups[t], currentValue);
+      delete groups[t];
+    }
+  });
+  Object.keys(groups).forEach(function(t) {
+    h += renderGroup(t, groups[t], currentValue);
+  });
+  
+  h += '<div class="rs-count">' + _rsFilteredRecords.length + ' / ' + _rsAllRecords.length + ' \u6761\u8bb0\u5f55</div>';
+  
+  listEl.innerHTML = h;
+}
+
+function renderGroup(typeName, records, currentValue) {
+  var h = '<div class="rs-group-title">' + getTypeLabel(typeName) + ' (' + records.length + ')</div>';
+  records.forEach(function(rec) {
+    var L = rec._rsLabel;
+    var isActive = (_rsFilteredRecords.indexOf(rec) === _rsActiveIndex) ? ' active' : '';
+    var isSelected = (rec.data_did === currentValue) ? ' selected' : '';
+    var badgeClass = ' rs-type-badge ' + typeName;
+    
+    var subHtml = L.sub ? '<div class="rs-sub">' + escapeHtml(L.sub) + '</div>' : '';
+    var timeHtml = L.ts ? '<span class="rs-time">' + escapeHtml(L.ts) + '</span>' : '';
+    
+    var didEsc = rec.data_did.replace(/'/g, "\\'");
+    h += '<div class="rs-item' + isActive + isSelected + '" data-did="' + didEsc + '" onclick="pickRichSelect(\'' + didEsc + '\')" onmouseenter="highlightRsItem(' + _rsFilteredRecords.indexOf(rec) + ')">' +
+      '<span class="' + badgeClass + '">' + escapeHtml(getTypeLabel(typeName)) + '</span>' +
+      '<div class="rs-info">' +
+        '<div class="rs-main">' + escapeHtml(L.main) + '</div>' +
+        subHtml +
+      '</div>' +
+      timeHtml +
+    '</div>';
+  });
+  return h;
+}
+
+function pickRichSelect(did) {
+  setRichSelectValue(did);
+  closeRichSelect();
+  currentDataDID = did;
+}
+
+function setRichSelectValue(did) {
+  document.getElementById('rs-value').value = did || '';
+  var placeholder = document.getElementById('rs-placeholder');
+  
+  if (!did) {
+    placeholder.textContent = '\u2014 \u641c\u7d22\u6216\u9009\u62e9\u8bb0\u5f55 \u2014';
+    placeholder.classList.add('empty');
+    return;
+  }
+  
+  var rec = null;
+  for (var i = 0; i < _rsAllRecords.length; i++) {
+    if (_rsAllRecords[i].data_did === did) { rec = _rsAllRecords[i]; break; }
+  }
+  
+  if (rec && rec._rsLabel) {
+    var L = rec._rsLabel;
+    var text = '[' + getTypeLabel(L.type) + '] ' + L.main;
+    if (L.sub) text += ' \u2014 ' + L.sub;
+    placeholder.textContent = text;
+  } else {
+    placeholder.textContent = did.substring(0, 28);
+  }
+  placeholder.classList.remove('empty');
+}
+
+function toggleRichSelect() {
+  var dropdown = document.getElementById('rs-dropdown');
+  var container = document.getElementById('verify-did');
+  var isOpen = dropdown.style.display !== 'none';
+  
+  if (isOpen) {
+    closeRichSelect();
+  } else {
+    dropdown.style.display = 'flex';
+    container.classList.add('open');
+    document.getElementById('rs-search').focus();
+    document.getElementById('rs-search').value = '';
+    filterRichSelect('');
+    if (document.getElementById('rs-value').value) {
+      var sel = dropdown.querySelector('.rs-item.selected');
+      if (sel) sel.scrollIntoView({block:'nearest'});
+    }
+  }
+}
+
+function closeRichSelect() {
+  var dropdown = document.getElementById('rs-dropdown');
+  var container = document.getElementById('verify-did');
+  dropdown.style.display = 'none';
+  container.classList.remove('open');
+  _rsActiveIndex = -1;
+}
+
+function highlightRsItem(index) {
+  _rsActiveIndex = index;
+  var items = document.querySelectorAll('#rs-list .rs-item');
+  items.forEach(function(el, i) {
+    el.classList.toggle('active', i === index);
+  });
+}
+
+function handleRsKeydown(event) {
+  var items = document.querySelectorAll('#rs-list .rs-item');
+  
+  switch(event.key) {
+    case 'ArrowDown':
+      event.preventDefault();
+      _rsActiveIndex = Math.min(_rsActiveIndex + 1, items.length - 1);
+      highlightRsItem(_rsActiveIndex);
+      items[_rsActiveIndex] && items[_rsActiveIndex].scrollIntoView({block:'nearest'});
+      break;
+    case 'ArrowUp':
+      event.preventDefault();
+      _rsActiveIndex = Math.max(_rsActiveIndex - 1, 0);
+      highlightRsItem(_rsActiveIndex);
+      items[_rsActiveIndex] && items[_rsActiveIndex].scrollIntoView({block:'nearest'});
+      break;
+    case 'Enter':
+      event.preventDefault();
+      if (_rsActiveIndex >= 0 && items[_rsActiveIndex]) {
+        pickRichSelect(items[_rsActiveIndex].getAttribute('data-did'));
+      }
+      break;
+    case 'Escape':
+      closeRichSelect();
+      break;
+  }
+}
+
+document.addEventListener('click', function(e) {
+  var container = document.getElementById('verify-did');
+  if (container && !container.contains(e.target)) {
+    closeRichSelect();
+  }
+});
+
 </script>
   </div><!-- /main-content -->
 </div><!-- /app-layout -->
