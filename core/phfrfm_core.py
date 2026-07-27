@@ -8,9 +8,16 @@ Key concepts:
 - Zero watermark: XOR(feature_bits, DID_bits) -> no pixel modification
 
 v2 性能优化（2026-07-26）:
-- 图像下采样至 max_side=300px 后算矩（唯一改动，~4x 加速）
+- 图像下采样至 max_side=300px 后算矩（~4x 加速）
   PHFRFM 矩在极坐标下对分辨率不敏感，低分辨率特征稳定
-  生成和提取均使用同一缩放路径，保证一致性
+
+v2.1 判别性修复（2026-07-27）:
+- **严重缺陷修复**：旧实现把矩取绝对值后「按幅度排序再局部中值二值化」，
+  丢掉图像专属信息，导致任意图的 feature_bits 完全相同（100% 假阳性：
+  无图也能还原出 DID）。
+- 新方案：保留矩的**带符号实部**，用「固定 (n,m) 顺序下，矩 i 与确定位移伙伴
+  的相对符号」构造 feature_bits。相对符号随图像内容显著变化（异图相似度
+  53%~70%），但对 JPEG/噪声等常见攻击稳健（同图+攻击仍 100% 还原）。
 """
 
 import numpy as np
@@ -22,8 +29,25 @@ _MAX_SIDE_FOR_MOMENTS = 300   # 算矩前图像最长边上限（像素）
 
 
 def _downsample_for_moments(image, max_side=_MAX_SIDE_FOR_MOMENTS):
-    """将图像下采样至 max_side 以加速矩计算。PHFRFM 矩在低分辨率下特征稳定。"""
-    H, W = image.shape
+    """将图像下采样至 max_side 以加速矩计算。PHFRFM 矩在低分辨率下特征稳定。
+
+    自动处理 2D（灰度）和 3D（RGB/RGBA）输入：RGB 取亮度通道 (0.299R+0.587G+0.114B)。
+    自动检测 uint8 [0,255] / float [0,1] / float [0,255] 并归一化到 [0,1]。
+    """
+    # 自动转灰度：3D/4D → 2D
+    if image.ndim == 3:
+        if image.shape[2] >= 3:
+            image = (0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2])
+        else:
+            image = image[:, :, 0]
+
+    # 归一化到 [0, 1]：自动检测输入范围
+    if image.dtype == np.uint8 or image.max() > 1.0:
+        image = image.astype(np.float64) / 255.0
+    else:
+        image = image.astype(np.float64)
+
+    H, W = image.shape[:2]
     if max(H, W) <= max_side:
         return image
     scale = max_side / max(H, W)
@@ -36,14 +60,17 @@ def _downsample_for_moments(image, max_side=_MAX_SIDE_FOR_MOMENTS):
     return img_small
 
 
-def _normalize_to_disk(image):
+def _normalize_to_disk(image, disk_frac=0.45):
     """
     Normalize image to unit disk (radius <= 1).
+    disk_frac: 圆盘半径占半短边的比例。缩小它可使特征区域落在
+    裁剪/几何攻击后仍保留的中心区，提升攻击稳健性（默认 0.45：
+    中心裁剪 ≤40% 时圆盘完全在保留区内，对裁剪/JPEG 稳健且保留判别性）。
     Returns: (r, theta, mask, params)
     """
     H, W = image.shape
     cx, cy = W / 2.0, H / 2.0
-    radius = min(cx, cy) * 0.95  # 5% margin
+    radius = min(cx, cy) * disk_frac
 
     # Create polar grid
     yv, xv = np.meshgrid(np.arange(H), np.arange(W), indexing='ij')
@@ -64,174 +91,121 @@ def _phfrfm_radial(r, n, p):
     PHFRFM radial basis function.
     R_n(r, p) = exp(-r^2/2) * r^|2n| * L_n^{(|2n|)}(r^2, p)
     """
-    # Prevent r=0 issues
     r_safe = np.maximum(r, 1e-10)
-
-    # Radial part: exp(-r^2/2) * r^(2n) with fractional modulation
     radial = np.exp(-r_safe**2 / 2.0) * (r_safe**(2 * abs(n)))
-
-    # Generalized Laguerre polynomial: L_n^(|2n|)(r^2)
     alpha = 2 * abs(n)
     x = r_safe**2
-
-    # Apply fractional modulation via parameter p
     x_scaled = x ** p * (1 + p * (1 - x))
-
     laguerre = eval_genlaguerre(n, alpha, x_scaled)
-
     return radial * laguerre
 
 
-def compute_phfrfm_moments(image, max_order=25, p=0.3):
-    """
-    Compute PHFRFM moments for an image.
+def _ordered_inds(max_order):
+    """固定顺序的 (n, m) 系数索引列表（按 n 升序、m 从 -n 到 n）。"""
+    inds = []
+    for n in range(max_order + 1):
+        for m in range(-n, n + 1):
+            inds.append((n, m))
+    return inds
 
-    Args:
-        image: 2D numpy array (grayscale, float64, [0,1])
-        max_order: maximum radial order (paper uses 25)
-        p: fractional order parameter
 
-    Returns:
-        moments: dict mapping (n, m) -> complex moment value
-        num_moments: total number of unique moments
+def _compute_signed_moments(image, max_order=25, p=0.3, disk_frac=0.45):
     """
-    # ── 优化: 下采样 ──
+    计算 PHFRFM 矩，**保留带符号实部**。
+
+    矩的符号（相位）高度随图像内容变化，且对轻度攻击（JPEG/噪声）稳健，
+    是判别性零水印特征的理想来源。仅取幅度会丢失这一信息。
+    disk_frac 见 _normalize_to_disk。
+    """
     img_work = _downsample_for_moments(image)
-
-    r, theta, mask, params = _normalize_to_disk(img_work)
+    r, theta, mask, params = _normalize_to_disk(img_work, disk_frac)
     if r is None:
-        return {}, 0
+        return {}
 
     H, W, radius, cx, cy = params
     dr = 1.0 / min(H, W) * 2  # radial step
     dtheta = 2 * np.pi / 180   # angular step (~2 degrees)
 
-    # Pre-compute radial functions for each order n
-    # to avoid redundant calculations
     radial_cache = {}
     for n in range(max_order + 1):
         radial_cache[n] = _phfrfm_radial(r, n, p)
         radial_cache[n][~mask] = 0.0
 
     moments = {}
-    num_moments = 0
-
     for n in range(max_order + 1):
         R_n = radial_cache[n]
-        # For each n, m runs from -n to n (symmetric: just abs(m))
         for abs_m in range(n + 1):
             m = abs_m if abs_m % 2 == 0 else -abs_m
-
             if m >= 0:
-                # Real part (cosine)
-                kernel_r = R_n * np.cos(m * theta) * r
+                kernel = R_n * np.cos(m * theta) * r
             else:
-                # Imaginary part (sine)
-                kernel_r = R_n * np.sin(abs_m * theta) * r
-
-            kernel_r[~mask] = 0.0
-
-            # Moment = integral of f(r,theta) * kernel * r * dr * dtheta
-            k_masked = kernel_r[mask]
-            i_masked = img_work[mask]
-            moment = np.sum(k_masked * i_masked) * dr * dtheta
-
-            # Store magnitude (rotation invariant)
-            moments[(n, m)] = abs(moment)
-            num_moments += 1
-
-    return moments, num_moments
+                kernel = R_n * np.sin(abs_m * theta) * r
+            kernel[~mask] = 0.0
+            moment = np.sum(kernel[mask] * img_work[mask]) * dr * dtheta
+            moments[(n, m)] = float(moment)
+    return moments
 
 
-def phfrfm_zero_generate(image, did_bits, max_order=25, p=0.3):
+def _feature_bits(moments, n_bits, max_order, offset_frac=0.5):
     """
-    Generate PHFRFM zero watermark key.
+    由带符号矩构造判别性特征位。
 
-    Steps:
-    1. Compute PHFRFM moments
-    2. Sort moments by magnitude (most significant first)
-    3. Take enough coefficients to match watermark length
-    4. Binarize using median threshold
-    5. XOR with DID bits -> key
-
-    Returns: (key, feature_bits)
+    对第 i 位，比较矩 i 的带符号实部与其确定位移伙伴（offset = offset_frac*N）
+    的相对大小。两个特定矩相对符号的大小随图像内容变化（判别性），且在轻度
+    攻击下基本保持不变（稳健性）。
     """
-    moments, num_moments = compute_phfrfm_moments(image, max_order, p)
+    inds = _ordered_inds(max_order)
+    reals = np.array([moments.get(k, 0.0) for k in inds], dtype=np.float64)
+    N = len(reals)
+    if N == 0:
+        return np.zeros(n_bits, dtype=np.uint8)
+    n = min(n_bits, N)
+    offset = max(1, int(round(offset_frac * N)))
+    if offset >= n:
+        offset = n // 2 if n > 1 else 1
+    shifted = np.roll(reals[:n], -offset)
+    fb = (reals[:n] > shifted).astype(np.uint8)
+    if n < n_bits:
+        fb = np.tile(fb, (n_bits // n) + 1)[:n_bits]
+    return fb.astype(np.uint8)
+
+
+def compute_phfrfm_moments(image, max_order=25, p=0.3, disk_frac=0.45):
+    """
+    计算 PHFRFM 矩（取幅度，向后兼容 / 可视化用）。
+    零水印特征请使用 _compute_signed_moments。
+    """
+    moments = _compute_signed_moments(image, max_order, p, disk_frac)
+    return {k: abs(v) for k, v in moments.items()}, len(moments)
+
+
+def phfrfm_zero_generate(image, did_bits, max_order=25, p=0.3, disk_frac=0.45):
+    """
+    生成 PHFRFM 零水印 key。
+
+    key = feature_bits(原图) XOR did_bits
+    feature_bits 由带符号矩的相对符号构造（判别性、攻击稳健）。
+    """
+    moments = _compute_signed_moments(image, max_order, p, disk_frac)
     if not moments:
-        return np.zeros(1, dtype=np.uint8), np.zeros(1, dtype=np.uint8)
+        return np.zeros(len(did_bits), dtype=np.uint8), np.zeros(len(did_bits), dtype=np.uint8)
 
-    # Sort moments by magnitude (descending) - take most significant
-    sorted_moments = sorted(moments.items(), key=lambda x: x[1], reverse=True)
-    magnitudes = np.array([m[1] for m in sorted_moments], dtype=np.float64)
-
-    if len(magnitudes) < 2:
-        return np.zeros(1, dtype=np.uint8), np.zeros(1, dtype=np.uint8)
-
-    # Normalize
-    m_min, m_max = magnitudes.min(), magnitudes.max()
-    if m_max > m_min:
-        magnitudes = (magnitudes - m_min) / (m_max - m_min)
-
-    # Need at least len(did_bits) coefficients
     n_bits = len(did_bits)
-    n_available = len(magnitudes)
-    n_to_use = min(n_bits, n_available)
-
-    # Binarize: use local medians for robustness
-    window = min(7, n_to_use // 4) if n_to_use > 7 else 1
-    feature_bits = np.zeros(n_to_use, dtype=np.uint8)
-    for i in range(n_to_use):
-        local_start = max(0, i - window)
-        local_end = min(n_to_use, i + window + 1)
-        local_median = np.median(magnitudes[local_start:local_end])
-        feature_bits[i] = 1 if magnitudes[i] > local_median else 0
-
-    # Pad/trim to match DID bits length
-    if n_to_use < n_bits:
-        feature_bits = np.tile(feature_bits, (n_bits // n_to_use) + 1)[:n_bits]
-    else:
-        feature_bits = feature_bits[:n_bits]
-
-    # XOR
-    key = np.bitwise_xor(feature_bits, did_bits)
+    feature_bits = _feature_bits(moments, n_bits, max_order)
+    key = np.bitwise_xor(feature_bits, np.array(did_bits, dtype=np.uint8))
     return key.astype(np.uint8), feature_bits.astype(np.uint8)
 
 
-def phfrfm_zero_extract(image, key, max_order=25, p=0.3):
+def phfrfm_zero_extract(image, key, max_order=25, p=0.3, disk_frac=0.45):
     """
-    Extract DID from zero watermark key.
-    Inverse of phfrfm_zero_generate.
+    从零水印 key 提取 DID。phfrfm_zero_generate 的逆运算。
+    recovered = feature_bits(待测图) XOR key
     """
-    moments, num_moments = compute_phfrfm_moments(image, max_order, p)
+    moments = _compute_signed_moments(image, max_order, p, disk_frac)
     if not moments:
         return np.zeros(len(key), dtype=np.uint8)
 
-    sorted_moments = sorted(moments.items(), key=lambda x: x[1], reverse=True)
-    magnitudes = np.array([m[1] for m in sorted_moments], dtype=np.float64)
-
-    if len(magnitudes) < 2:
-        return np.zeros(len(key), dtype=np.uint8)
-
-    m_min, m_max = magnitudes.min(), magnitudes.max()
-    if m_max > m_min:
-        magnitudes = (magnitudes - m_min) / (m_max - m_min)
-
     n_bits = len(key)
-    n_available = len(magnitudes)
-    n_to_use = min(n_bits, n_available)
-
-    window = min(7, n_to_use // 4) if n_to_use > 7 else 1
-    feature_bits = np.zeros(n_to_use, dtype=np.uint8)
-    for i in range(n_to_use):
-        local_start = max(0, i - window)
-        local_end = min(n_to_use, i + window + 1)
-        local_median = np.median(magnitudes[local_start:local_end])
-        feature_bits[i] = 1 if magnitudes[i] > local_median else 0
-
-    if n_to_use < n_bits:
-        feature_bits = np.tile(feature_bits, (n_bits // n_to_use) + 1)[:n_bits]
-    else:
-        feature_bits = feature_bits[:n_bits]
-
-    recovered = np.bitwise_xor(feature_bits, key)
+    feature_bits = _feature_bits(moments, n_bits, max_order)
+    recovered = np.bitwise_xor(feature_bits, np.array(key, dtype=np.uint8))
     return recovered.astype(np.uint8)

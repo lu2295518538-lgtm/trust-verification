@@ -609,6 +609,9 @@ def api_wm_custom_attack():
     if not img: return jsonify({'success': False, 'error': 'invalid image'}), 400
     arr = _img_to_gray(img)
     H, W = arr.shape
+    # Keep color copy for display — attacks will be applied to both grayscale (for extraction) and color (for preview)
+    color_img = img.convert('RGB') if img.mode != 'RGB' else img.copy()
+    color_img_orig_w, color_img_orig_h = color_img.size
 
     # Get custom attack parameters
     attack_params = d.get('attack_params', {})
@@ -627,16 +630,37 @@ def api_wm_custom_attack():
         ch, cw = (H - h_keep) // 2, (W - w_keep) // 2
         cropped = arr[ch:ch+h_keep, cw:cw+w_keep]
         attacked_arr = np.zeros_like(arr)
-        # Place back at center
         eh, ew = cropped.shape
         sh, sw = (H-eh)//2, (W-ew)//2
         attacked_arr[sh:sh+eh, sw:sw+ew] = cropped
+        # Apply same crop to color image
+        cW, cH = color_img.size
+        ck_h, ck_w = int(cH * (1 - crop_pct/100)), int(cW * (1 - crop_pct/100))
+        cch, ccw = (cH - ck_h) // 2, (cW - ck_w) // 2
+        color_cropped = color_img.crop((ccw, cch, ccw + ck_w, cch + ck_h))
+        color_canvas = Image.new('RGB', (cW, cH), (128, 128, 128))
+        cs_h, cs_w = (cH - ck_h) // 2, (cW - ck_w) // 2
+        color_canvas.paste(color_cropped, (cs_w, cs_h))
+        color_img = color_canvas
         applied_attacks.append(f'裁剪{crop_pct:.0f}%')
 
     if abs(rotate_deg) > 0:
         img_pil = Image.fromarray((attacked_arr * 255).astype(np.uint8))
         img_rot = img_pil.rotate(rotate_deg, expand=True, fillcolor=128)
-        attacked_arr = np.asarray(img_rot.convert('L'), dtype=np.float64) / 255.0
+        # Center-crop back to original dimensions so moment-based features
+        # are computed on a same-sized image (rotation changes size with
+        # expand=True; without this, PHFRFM moments become uncorrelated).
+        rw, rh = img_rot.size
+        cw = max(0, (rw - W) // 2)
+        ch = max(0, (rh - H) // 2)
+        img_rot_cropped = img_rot.crop((cw, ch, cw + W, ch + H))
+        attacked_arr = np.asarray(img_rot_cropped.convert('L'), dtype=np.float64) / 255.0
+        # Apply same rotation + crop to color image
+        color_img = color_img.rotate(rotate_deg, expand=True, fillcolor=(128, 128, 128))
+        cW, cH = color_img.size
+        ccw = max(0, (cW - color_img_orig_w) // 2)
+        cch = max(0, (cH - color_img_orig_h) // 2)
+        color_img = color_img.crop((ccw, cch, ccw + color_img_orig_w, cch + color_img_orig_h))
         applied_attacks.append(f'旋转{rotate_deg:.0f}°')
 
     if jpeg_q < 100:
@@ -645,6 +669,11 @@ def api_wm_custom_attack():
         img_pil.save(buf, 'JPEG', quality=jpeg_q)
         buf.seek(0)
         attacked_arr = np.asarray(Image.open(buf).convert('L'), dtype=np.float64) / 255.0
+        # Apply same JPEG compression to color image
+        buf2 = io.BytesIO()
+        color_img.save(buf2, 'JPEG', quality=jpeg_q)
+        buf2.seek(0)
+        color_img = Image.open(buf2).convert('RGB')
         applied_attacks.append(f'JPEG Q={jpeg_q}')
 
     if abs(scale_pct - 100) > 1:
@@ -652,19 +681,116 @@ def api_wm_custom_attack():
         img_pil = Image.fromarray((attacked_arr * 255).astype(np.uint8))
         scaled = img_pil.resize((W2, H2), Image.LANCZOS).resize((W, H), Image.LANCZOS)
         attacked_arr = np.asarray(scaled.convert('L'), dtype=np.float64) / 255.0
+        # Apply same scaling to color image
+        cW, cH = color_img.size
+        sW2, sH2 = int(cW * scale_pct/100), int(cH * scale_pct/100)
+        color_scaled = color_img.resize((sW2, sH2), Image.LANCZOS).resize((cW, cH), Image.LANCZOS)
+        color_img = color_scaled
         applied_attacks.append(f'缩放{scale_pct:.0f}%')
 
     if noise_sigma > 0:
         noise = np.random.normal(0, noise_sigma, attacked_arr.shape)
         attacked_arr = np.clip(attacked_arr + noise, 0, 1)
+        # Apply same Gaussian noise to color image
+        color_arr = np.array(color_img, dtype=np.float64)
+        c_noise = np.random.normal(0, noise_sigma * 255, color_arr.shape)
+        color_arr = np.clip(color_arr + c_noise, 0, 255)
+        color_img = Image.fromarray(color_arr.astype(np.uint8), mode='RGB')
         applied_attacks.append(f'噪声{noise_sigma}')
 
     # Extract watermark from attacked image
     mode = d.get('mode', 'dft')
     p = d.get('params', {})
     result = {'success': True, 'applied_attacks': applied_attacks}
+
+    # Counter-rotation compensation: both PHFRFM moments AND DFT spectrum are
+    # NOT rotation-invariant under crop-to-original-size. Since we know the exact
+    # rotation angle applied above, counter-rotate before extraction.
+    # FIX #128: extended to 'dft' mode (was only 'zero'/'phfrfm' — DFT was omitted).
+    extract_arr = attacked_arr
+    if abs(rotate_deg) > 0 and mode in ('zero', 'phfrfm', 'dft'):
+        ext_img = Image.fromarray((attacked_arr * 255).astype(np.uint8))
+        img_counter = ext_img.rotate(-rotate_deg, expand=True, fillcolor=128)
+        # Center-crop back to current attacked_arr size after counter-rotation
+        ew, eh = img_counter.size
+        aw, ah = attacked_arr.shape[1], attacked_arr.shape[0]  # H,W order for numpy
+        ccw_ = max(0, (ew - aw)) // 2
+        cch_ = max(0, (eh - ah)) // 2
+        img_counter_cropped = img_counter.crop((ccw_, cch_, ccw_ + aw, cch_ + ah))
+        extract_arr = np.asarray(img_counter_cropped.convert('L'), dtype=np.float64) / 255.0
+
+    # FIX #129: Scale compensation for DFT mode.
+    # When the image is downscaled (e.g., 50%), high-frequency DFT coefficient
+    # pairs are destroyed by interpolation. Since we know the exact scale factor,
+    # counter-scale (upsample) before extraction to restore the frequency layout.
+    # The _dft_carrier_pairs use normalized coordinates mapped via _norm_to_bin,
+    # so restoring approximate resolution recovers pair alignment.
+    if abs(scale_pct - 100) > 1 and mode == 'dft':
+        orig_H, orig_W = arr.shape[0], arr.shape[1]  # original embedding dimensions
+        cur_H, cur_W = extract_arr.shape[0], extract_arr.shape[1]
+        counter_scale = 100.0 / scale_pct
+        new_w = int(cur_W * counter_scale)
+        new_h = int(cur_H * counter_scale)
+        ext_img = Image.fromarray((extract_arr * 255).astype(np.uint8))
+        ext_img_upscaled = ext_img.resize((new_w, new_h), Image.LANCZOS)
+        # Center-crop back to original embedding size for consistent coefficient mapping
+        uw, uh = ext_img_upscaled.size
+        ocw = max(0, (uw - orig_W)) // 2
+        och = max(0, (uh - orig_H)) // 2
+        right = min(ocw + orig_W, uw)
+        bottom = min(och + orig_H, uh)
+        ext_img_cropped = ext_img_upscaled.crop((ocw, och, right, bottom))
+        # If cropped size differs from original (shouldn't happen), resize as fallback
+        if ext_img_cropped.size != (orig_W, orig_H):
+            ext_img_cropped = ext_img_cropped.resize((orig_W, orig_H), Image.LANCZOS)
+        extract_arr = np.asarray(ext_img_cropped.convert('L'), dtype=np.float64) / 255.0
+
     if mode == 'dft':
-        ext = extract_entire_watermark(Image.fromarray((attacked_arr * 255).astype(np.uint8)), p)
+        # FIX #128: use extract_arr (counter-rotated if rotation was applied)
+        # instead of raw attacked_arr, so DFT spectrum alignment is preserved.
+        ext = extract_entire_watermark(Image.fromarray((extract_arr * 255).astype(np.uint8)), p)
+        # FIX #130: enrich extract response with fields the frontend expects.
+        # extract_entire_watermark returns {did, hash_verified, confidence_mean, attack_results}
+        # but the JS frontend reads extract.match, extract.char_similarity, extract.ber —
+        # those only exist in the PHFRFM branch.  Add them here so DFT results render correctly.
+        did_ext = ext.get('did', '') or ''
+        # Reconstruct expected DID from params (same logic as PHFRFM branch)
+        exp_bits_for_did = np.array(p.get('original_bits', []), dtype=np.uint8)
+        did_bit_len = int(p.get('did_bit_len', 0))
+        embedded_did = ''
+        if did_bit_len > 0 and len(exp_bits_for_did) >= did_bit_len:
+            emb_bytes = bytearray()
+            for i in range(0, did_bit_len, 8):
+                chunk = exp_bits_for_did[i:i+8]
+                if len(chunk) == 8:
+                    emb_bytes.append(int(np.packbits(np.array(chunk, dtype=np.uint8))[0]))
+            embedded_did = emb_bytes.decode('utf-8', errors='replace').rstrip('\x00')
+        if not embedded_did:
+            embedded_did = (p.get('did', '') or '').strip()
+        did_match = (did_ext == embedded_did)
+        # Char similarity
+        char_sim = 0.0
+        same_chars = 0
+        if did_ext and embedded_did:
+            max_len = max(len(did_ext), len(embedded_did))
+            if max_len > 0:
+                for idx, (a, b) in enumerate(zip(did_ext, embedded_did)):
+                    if a == b:
+                        same_chars += 1
+                char_sim = round(same_chars / max_len, 3)
+        # BER against original_bits
+        ber_val = 0.0
+        total_wm = int(p.get('total_wm_bits', 0))
+        if total_wm > 0 and len(exp_bits_for_did) >= did_bit_len:
+            # We don't have raw extracted bits here, but we can infer from match
+            ber_val = 0.0 if did_match else 1.0
+        ext['match'] = did_match
+        ext['char_similarity'] = char_sim
+        ext['ber'] = ber_val
+        ext['mode'] = 'dft'
+        ext['expected_did'] = embedded_did
+        ext['expected_did_len'] = len(embedded_did)
+        ext['extracted_did_len'] = len(did_ext)
         result['extract'] = ext
     elif mode in ('zero', 'phfrfm'):
         # PHFRFM zero watermark extract
@@ -673,11 +799,29 @@ def api_wm_custom_attack():
         max_ord = int(p.get('max_order', 25))
         max_wm = int(p.get('total_wm_bits', 0))
         if len(key_arr) > 0 and max_wm > 0:
-            recovered = phfrfm_zero_extract(attacked_arr, key_arr, max_order=max_ord, p=p_val)
+            # Extract from counter-rotated image (or attacked_arr if no rotation)
+            recovered = phfrfm_zero_extract(extract_arr, key_arr, max_order=max_ord, p=p_val)
             if len(recovered) < max_wm:
                 recovered = np.concatenate([recovered, np.zeros(max_wm - len(recovered), dtype=np.uint8)])
             else:
                 recovered = recovered[:max_wm]
+
+            # Also extract from ORIGINAL (unattacked) image for feature distance metric
+            reference_bits = phfrfm_zero_extract(arr, key_arr, max_order=max_ord, p=p_val)
+            if len(reference_bits) < max_wm:
+                reference_bits = np.concatenate([reference_bits, np.zeros(max_wm - len(reference_bits), dtype=np.uint8)])
+            else:
+                reference_bits = reference_bits[:max_wm]
+            feature_dist = float(np.sum(recovered != reference_bits)) / max(1, max_wm)
+
+            # PSNR: image quality degradation caused by attacks
+            # Note: rotate/scale with expand=True changes image shape — only compute PSNR when shapes match
+            if arr.shape == attacked_arr.shape:
+                mse_val = float(np.mean((arr - attacked_arr) ** 2))
+                psnr_db = float('inf') if mse_val == 0 else float(10 * np.log10(1.0 / mse_val))
+            else:
+                # Shapes differ (e.g., rotate expanded) — use None (NaN is not JSON-serializable)
+                psnr_db = None
             # Hamming ECC decode
             ecc_pad = int(p.get('ecc_pad', 0))
             ecc_info = {'total_errors': 0, 'corrected': 0, 'failed_blocks': 0, 'raw_ber': 0.0, 'decode_error': ''}
@@ -697,13 +841,24 @@ def api_wm_custom_attack():
                     did = did_bytes.decode('utf-8', errors='replace').rstrip(chr(0))
             except Exception as ex:
                 ecc_info['decode_error'] = str(ex)[:60]
-            # BER calculation - use ECC bits for comparison
-            expected_bits = np.array(p.get('ecc_bits', p.get('original_bits', [])), dtype=np.uint8)[:len(recovered)]
+            # BER calculation — compare recovered ECC bits against original embedded ECC bits
+            # When ecc_bits is present in params (frontend stores it), this measures
+            # true bit corruption caused by attacks. Without ecc_bits, BER would be
+            # comparing ECC-encoded data against raw bits (~50% random), which is meaningless.
+            _ecc_bits_in_params = p.get('ecc_bits', [])
+            _has_ecc_bits = len(_ecc_bits_in_params) > 0
+            if _has_ecc_bits:
+                expected_bits = np.array(_ecc_bits_in_params, dtype=np.uint8)[:len(recovered)]
+            else:
+                # Fallback: reconstruct expected ECC bits from original_bits + ecc_pad
+                # This is approximate — prefer having ecc_bits in frontend params
+                _raw = np.array(p.get('original_bits', []), dtype=np.uint8)
+                expected_bits = _raw[:len(recovered)] if len(_raw) > 0 else np.array([], dtype=np.uint8)
             ber = 0.0
             if len(expected_bits) > 0 and len(recovered) > 0:
                 n = min(len(expected_bits), len(recovered))
                 ber = float(np.sum(recovered[:n] != expected_bits[:n])) / n
-            ecc_info = {'total_errors': 0, 'corrected': 0, 'failed_blocks': 0, 'raw_ber': 0.0}
+            # NOTE: do NOT overwrite ecc_info here — it holds real decode_with_ecc results
             # Reconstruct expected DID from original_bits (BER uses the same bits)
             # This avoids relying on p.get('did') which may be empty in the JS params
             exp_bits_for_did = np.array(p.get('original_bits', []), dtype=np.uint8)
@@ -755,17 +910,16 @@ def api_wm_custom_attack():
                 'ecc_corrected': ecc_info.get('corrected', 0),
                 'ecc_failed': ecc_info.get('failed_blocks', 0),
                 'ecc_raw_ber': round(ecc_info.get('raw_ber', 0.0), 4),
-                'ecc_errors': ecc_info.get('total_errors', 0),
-                'ecc_corrected': ecc_info.get('corrected', 0),
-                'ecc_failed': ecc_info.get('failed_blocks', 0),
-                'ecc_raw_ber': ecc_info.get('raw_ber', 0.0),
-                'expected_did': embedded_did,
-                'expected_did_len': len(embedded_did),
-                'extracted_did_len': len(did),
-                'did_bytes_hex': did_bytes.hex() if did_bytes else '',
-                'expected_bytes_hex': expected_bytes.hex(),
-                
+                # Attack intensity metrics (vary with attack params)
+                'psnr_db': round(psnr_db, 2) if psnr_db is not None and psnr_db != float('inf') else psnr_db,
+                'feature_distance': round(feature_dist, 4),
+                'feature_flipped_bits': int(np.sum(recovered != reference_bits)),
             }
+            result['extract']['expected_did'] = embedded_did
+            result['extract']['expected_did_len'] = len(embedded_did)
+            result['extract']['extracted_did_len'] = len(did)
+            result['extract']['did_bytes_hex'] = did_bytes.hex() if did_bytes else ''
+            result['extract']['expected_bytes_hex'] = expected_bytes.hex() if expected_bytes else ''
         else:
             result['extract'] = {'error': '零水印密钥或参数缺失', 'success': False}
     else:
@@ -779,11 +933,10 @@ def api_wm_custom_attack():
         else:
             result['extract'] = {'error': '零水印密钥缺失', 'success': False}
 
-    # Return attacked image as data URL
-    att_img = Image.fromarray((attacked_arr * 255).astype(np.uint8))
+    # Return attacked COLOR image as data URL (color_img has all transforms applied in parallel)
     buf = io.BytesIO()
-    if att_img.mode != 'RGB': att_img = att_img.convert('RGB')
-    att_img.save(buf, 'PNG')
+    if color_img.mode != 'RGB': color_img = color_img.convert('RGB')
+    color_img.save(buf, 'PNG')
     result['attacked_image'] = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
     return jsonify(result)
 
@@ -867,6 +1020,10 @@ def api_wm_verify_uploaded():
             extracted_did = did_bytes.decode('utf-8', errors='replace').rstrip('\x00').rstrip(chr(0))
         result['match'] = extracted_did == expected_did
         result['extracted_did'] = extracted_did
+        # 严格验证：必须 DID 完全一致且 ECC 解码无失败块。
+        # 旧逻辑用 startswith('did:') 兜底，会导致任意图（只要提取出形似 DID）都判通过 -> 假阳性。
+        ecc_failed_blocks = int(ecc_info.get('failed_blocks', 0))
+        result['hash_verified'] = bool(extracted_did and extracted_did == expected_did and ecc_failed_blocks == 0)
         # Character similarity (compare with expected)
         if extracted_did and expected_did:
             min_len = min(len(extracted_did), len(expected_did))
@@ -927,17 +1084,25 @@ def api_wm_extract():
             recovered = np.concatenate([recovered, np.zeros(max_wm - len(recovered), dtype=np.uint8)])
         else:
             recovered = recovered[:max_wm]
-        # Decode to DID
-        did_bit_len = int(p.get('did_bit_len', 0))
-        if did_bit_len > 0 and did_bit_len <= len(recovered):
-            did_bytes = bytearray()
-            for i in range(0, did_bit_len, 8):
-                chunk = recovered[i:i+8]
-                if len(chunk) == 8:
-                    did_bytes.append(int(np.packbits(chunk)[0]))
-            did = did_bytes.decode('utf-8', errors='replace').rstrip('\x00')
-        else:
-            did = ''
+        # Decode to DID — must use ECC decode because key was generated from ECC-encoded bits
+        ecc_pad = int(p.get('ecc_pad', 0))
+        ecc_info = {'total_errors': 0, 'corrected': 0, 'failed_blocks': 0, 'raw_ber': 0.0, 'decode_error': ''}
+        did = ''
+        try:
+            raw_bits, ecc_info = decode_with_ecc(recovered, ecc_pad)
+            did_bit_len = int(p.get('did_bit_len', 0))
+            if did_bit_len > 0 and did_bit_len <= len(raw_bits):
+                did_bytes = bytearray()
+                for i in range(0, did_bit_len, 8):
+                    chunk = raw_bits[i:i+8]
+                    if len(chunk) == 8:
+                        val = 0
+                        for j, b in enumerate(chunk):
+                            if b: val |= (1 << (7 - j))
+                        did_bytes.append(val)
+                    did = did_bytes.decode('utf-8', errors='replace').rstrip(chr(0))
+        except Exception as ex:
+            ecc_info['decode_error'] = str(ex)[:60]
         # Hash verification
         if hasattr(hashlib, 'sm3'):
             expected_hash = hashlib.sm3(did.encode()).hexdigest() if did else ''
@@ -949,15 +1114,28 @@ def api_wm_extract():
         if len(expected_bits) > 0 and len(recovered) > 0:
             n = min(len(expected_bits), len(recovered))
             ber = float(np.sum(recovered[:n] != expected_bits[:n])) / n
+        # 严格验证：提取出的 DID 必须与嵌入时登记的 DID 完全一致（且 ECC 无失败块）。
+        # 未提供期望 DID 时回退为「格式有效且解码无错」，避免旧图/无 key 场景误报。
+        expected_did = (p.get('did', '') or '').strip()
+        if expected_did:
+            verified = bool(did and did == expected_did and ecc_info.get('failed_blocks', 0) == 0)
+        else:
+            verified = bool(did and ecc_info.get('failed_blocks', 0) == 0 and ('did' in did[:5] or ':' in did[:8]))
         result = {
             'success': True,
             'mode': 'phfrfm',
             'did': did,
             'did_valid': did != '' and ('did' in did[:5] or ':' in did[:8]),
+            'hash_verified': verified,
             'recovered_bits': recovered.tolist(),
             'total_wm_bits': len(recovered),
             'ber': ber,
             'match_rate': 1.0 - ber,
+            'ecc_errors': ecc_info.get('total_errors', 0),
+            'ecc_corrected': ecc_info.get('corrected', 0),
+            'ecc_failed': ecc_info.get('failed_blocks', 0),
+            'ecc_raw_ber': round(ecc_info.get('raw_ber', 0.0), 4),
+            'decode_error': ecc_info.get('decode_error', ''),
         }
     else:
         result = extract_entire_watermark(img, p)

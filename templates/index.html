@@ -1017,9 +1017,11 @@ body {
       </details>
       <!-- Upload and verify -->
       <details style="margin-top:8px; font-size:var(--t-small);">
-        <summary style="cursor:pointer; color:var(--ink-2);"> 上传已处理图片验证（点此展开）</summary>
+        <summary style="cursor:pointer; color:var(--ink-2);"> 上传图片验证（原图或攻击图）</summary>
         <div style="padding:8px 0;">
-          <p style="font-size:var(--t-micro); color:var(--ink-3); margin-bottom:6px;">下载嵌入水印的图片后，用 Photoshop / 微信 / 截图等处理，再上传回来验证</p>
+          <p style="font-size:var(--t-micro); color:var(--ink-3); margin-bottom:6px; line-height:1.6;">
+            <b>零水印说明：</b>本系统不在图内写入可见数据，而是从<b>原始载体图</b>提取特征生成密钥（原图看起来原封不动）。可上传：① 嵌入时使用的<b>原始载体图</b>本身（原图即可完整还原 DID，<b>通过属设计预期</b>）；② 或经截图 / 压缩 / 微信转发 / 滤镜等处理的图（测攻击稳健性）。<b>内容完全不同的图无法通过</b>——这正是防伪逻辑。
+          </p>
           <input type="file" id="attacked-file" accept="image/*" style="font-size:var(--t-micro);">
           <div style="margin-top:6px;">
             <label>期望DID: <input type="text" id="verify-expected-did" class="input" style="width:300px; font-size:var(--t-micro);" placeholder="did:trust:livestock:data:..."></label>
@@ -2818,7 +2820,9 @@ async function extractWatermark() {
     if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
     const resp = await r.json();
     const did = resp.did || '';
-    const ok = resp.success !== false && (resp.hash_verified || (did && did.indexOf('did') === 0));
+    // 严格判定：仅当后端 hash_verified 为真（DID 与嵌入登记一致且 ECC 无失败块）才视为通过。
+    // 不再用「形似 DID」兜底，避免任意图被误判为提取成功。
+    const ok = resp.success !== false && resp.hash_verified === true;
     const el = document.getElementById('wm-extract-result');
     el.style.display = 'block';
     el.className = 'verify-result ' + (ok ? 'ok' : 'bad');
@@ -2886,7 +2890,7 @@ async function embedWatermark() {
     if (!resp.success) { showToast(resp.error, 'err'); return; }
 
     // Store params for later extraction
-    wmEmbedParams = { mode: mode, did: did, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [], ecc_pad: resp.ecc_pad || 0, max_order: parseInt((document.getElementById('wm-order')||{}).value || 25), p: parseFloat((document.getElementById('wm-p')||{}).value || 0.3) };
+    wmEmbedParams = { mode: mode, did: did, did_bit_len: resp.did_bit_len, total_wm_bits: resp.total_wm_bits, key: resp.key, original_bits: resp.original_bits || [], ecc_bits: resp.ecc_bits || [], ecc_pad: resp.ecc_pad || 0, ecc_blocks: resp.ecc_blocks || 0, max_order: parseInt((document.getElementById('wm-order')||{}).value || 25), p: parseFloat((document.getElementById('wm-p')||{}).value || 0.3) };
     wmWatermarkedImage = resp.watermarked_image;
     const exBtn = document.getElementById('btn-extract-wm'); if (exBtn) exBtn.disabled = false;
 
@@ -3572,7 +3576,7 @@ async function verifyUploaded() {
   const didInput = document.getElementById('verify-expected-did');
   if (!fileInput.files[0]) { showToast('请上传图片', 'err'); return; }
   if (!didInput.value.trim()) { showToast('请输入期望的DID', 'err'); return; }
-  if (!wmEmbedParams) { showToast('请先嵌入水印', 'err'); return; }
+  if (!wmEmbedParams) { showToast('请先嵌入以生成验证密钥', 'err'); return; }
 
   document.getElementById('upload-verify-result').innerHTML = ' 验证中...';
 
