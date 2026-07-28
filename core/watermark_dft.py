@@ -1,10 +1,14 @@
 """
 DFT频域水印 + 零水印混合方案 — 核心算法模块
-- DFT中频环形区域嵌入（结合周期编码+投票）
-- 零水印（极谐波分数傅里叶矩特征 + XOR）
-- 双重水印：DID明文 + SM3(DID)隐藏哈希
+- DFT 中频环形区域嵌入（径向归一化 + 配对系数 + 均值聚合），承载 DID 明文
+- 零水印（DFT 幅度谱环形积分特征 + XOR），不修改像素、实现无损
 - 鲁棒性评估：PSNR, NC, BER
 - 攻击模拟：裁剪/旋转/缩放/JPEG压缩
+
+已知边界（实测，非缺陷而是频域水印固有局限）：
+- DFT 幅度配对水印对 JPEG压缩 / 50%缩放 / 轻噪声鲁棒（BER≈0）；
+- 对旋转 / 中心裁剪固有脆弱（BER≈0.5，≈随机），且无旋转/缩放不变补偿；
+- 零水印层（DFT 环形积分）同样不具几何攻击不变性，仅对温和亮度/对比度变化较稳。
 """
 import numpy as np
 from PIL import Image, ImageFilter
@@ -51,6 +55,22 @@ def ber(original_wm_bits, extracted_wm_bits):
         return 1.0
     return float(np.sum(o != e) / len(o))
 
+
+def _wm_hash(data: bytes) -> str:
+    """水印指纹哈希：优先国密 SM3（需 gmssl 库），不可用则回退 SHA256 并告警一次。
+
+    说明：标准库 hashlib 不带 sm3，原代码 `hasattr(hashlib,'sm3')` 永远为 False，
+    会静默降级为 SHA256 却仍对外宣称“SM3”。此处显式化，避免国密合规性的虚假宣称。
+    """
+    try:
+        from gmssl import sm3 as _sm3
+        return _sm3.sm3_hash(data)
+    except Exception:
+        if not getattr(_wm_hash, "_warned", False):
+            logger.warning("gmssl 不可用，水印哈希回退 SHA256（非国密 SM3）")
+            _wm_hash._warned = True
+        return hashlib.sha256(data).hexdigest()
+
 # ─── 水印消息编码 ───
 
 def encode_watermark_message(did: str, secret_hash: str = None, repetitions=5, H=1280, W=1280):
@@ -71,7 +91,7 @@ def encode_watermark_message(did: str, secret_hash: str = None, repetitions=5, H
     did_bits = list(np.unpackbits(np.frombuffer(did_bytes, dtype=np.uint8)))
 
     if secret_hash is None:
-        secret_hash = hashlib.sm3(did.encode()).hexdigest() if hasattr(hashlib, 'sm3') else hashlib.sha256(did.encode()).hexdigest()
+        secret_hash = _wm_hash(did.encode())
     hash_bytes = bytes.fromhex(secret_hash)
     hash_bits = list(np.unpackbits(np.frombuffer(hash_bytes, dtype=np.uint8)))
 
@@ -97,61 +117,11 @@ def decode_watermark_message(bits, did_bit_len: int):
     recovered_hash = hash_bytes.hex()
 
     # 验证
-    if hasattr(hashlib, 'sm3'):
-        expected = hashlib.sm3(did.encode()).hexdigest()
-    else:
-        expected = hashlib.sha256(did.encode()).hexdigest()
+    expected = _wm_hash(did.encode())
 
     return did, recovered_hash, expected
 
 # ─── DFT 频域水印嵌入 ───
-
-def _get_block_layout(H, W, n_bits, block_size=8, replicas=5):
-    """为 n_bits 个水印比特分配 (replicas*100) 个嵌入块的位置。
-
-    返回: list of [(bit_idx, replica_idx, (by, bx))] 每个水印比特有 replicas 个块,等距分散
-    """
-    bits_per_row = W // block_size
-    n_rows = H // block_size
-    total_blocks = bits_per_row * n_rows
-
-    # 每个比特用 100 个块 (5 副本 × 20 间隔),即使部分被攻击也能投票恢复
-    # 计算: 每个 bit 需要的 slot 数 = replicas + 间隔
-    # 如果容量不够, 降级到 stride=1 (即连续块) 并使用 mod 循环 (会覆盖)
-    blocks_per_bit_with_replicas = max(replicas * 20, 50)
-    if total_blocks < n_bits * blocks_per_bit_with_replicas:
-        # 容量不够 - 每个 bit 至少需要 1 块 × 副本数
-        # 调整为: blocks_per_bit = ceil(total_blocks / n_bits) 但 >= replicas
-        blocks_per_bit_with_replicas = max(replicas, total_blocks // n_bits)
-        if blocks_per_bit_with_replicas < total_blocks // n_bits:
-            blocks_per_bit_with_replicas = total_blocks // n_bits
-
-    stride = max(1, blocks_per_bit_with_replicas // replicas)
-    blocks_per_bit = stride * replicas
-
-    layout = []
-    used_blocks = set()
-    for i in range(n_bits):
-        for rep in range(replicas):
-            # 先尝试唯一块
-            base = i * blocks_per_bit_with_replicas + rep * stride
-            block_idx = base
-            # 寻找未使用的块 (避免覆盖)
-            while block_idx in used_blocks:
-                block_idx = (block_idx + 1) % total_blocks
-            used_blocks.add(block_idx)
-            by = (block_idx // bits_per_row) * block_size
-            bx = (block_idx % bits_per_row) * block_size
-            if by + block_size <= H and bx + block_size <= W:
-                layout.append((i, rep, (by, bx)))
-    return layout
-
-
-def _block_center_mean(img, by, bx, block_size=8):
-    """计算 8x8 块中心 3x3 区域的均值 (4 个像素 → 稳定估计)"""
-    cy, cx = block_size // 2, block_size // 2
-    return float(np.mean(img[by+cy-1:by+cy+2, bx+cx-1:bx+cx+2]))
-
 
 def _dft_carrier_pairs(n_bits, K=80, rmin=0.08, rmax=0.33, seed=0x5A17, H=1000, W=800):
     """For each bit, two INTERLEAVED coefficient groups A,B at matched radii.
@@ -354,103 +324,7 @@ def dft_extract(img_array, watermark_len, ring_radius_range=(40, 120), alpha=0.0
     return np.array(extracted_bits, dtype=np.uint8), np.array(confidence)
 
 
-def _compute_phfrm_features(img, n_orders=4, n_repetitions=4):
-    """
-    极谐波分数傅里叶矩 (PHFRFM) - 文献1算法
-
-    定义: M_nl = (1/2π) ∫∫ exp(-j*2π*n*r²) * exp(-j*l*θ) * f(r,θ) * r dr dθ
-    性质: 旋转不变、缩放不变 (normalized polar coords)
-
-    优化: 向量化 + 减少 moments 数 (4 阶 × 4 重复 = 33 个)
-    速度: 从 1.23s 降到 ~0.3s (4x 加速)
-    """
-    H, W = img.shape
-    # 只计算圆内的点 (有效像素)
-    cy, cx = H // 2, W // 2
-    r_max_pix = min(H, W) // 2 - 1
-
-    # 一次性创建网格 (限向量化)
-    Y, X = np.ogrid[:H, :W]
-    y_c = Y - cy
-    x_c = X - cx
-    r = np.sqrt(x_c * x_c + y_c * y_c)
-    # 只保留圆内像素
-    mask_circle = r <= r_max_pix
-
-    # 归一化 r 到 [0, 1]
-    r_norm = np.clip(r / r_max_pix, 0, 1) * mask_circle
-    # 角度
-    theta = np.arctan2(y_c, x_c) * mask_circle
-
-    # 应用 valid mask
-    img_masked = img * mask_circle
-
-    # 向量化计算所有 moments
-    # M_nl 复数 = sum(img * exp(-j*2π*n*r²) * exp(-j*l*θ))
-    #       = sum(img * exp(-j*(2π*n*r² + l*θ)))
-    # 实部 = sum(img * cos(...)), 虚部 = -sum(img * sin(...))
-    features = []
-    for n in range(n_orders):
-        radial = 2 * np.pi * n * r_norm * r_norm  # (H, W)
-        cos_rad = np.cos(radial) * mask_circle
-        sin_rad = np.sin(radial) * mask_circle
-        for l in range(-n_repetitions, n_repetitions + 1):
-            ang = l * theta
-            # exp(-j*(radial + ang)) = cos(radial + ang) - j*sin(radial + ang)
-            # 展开: cos(a+b) = cos(a)cos(b) - sin(a)sin(b)
-            kernel_cos = cos_rad * np.cos(ang) - sin_rad * np.sin(ang)
-            kernel_sin = cos_rad * np.sin(ang) + sin_rad * np.cos(ang)
-            re = np.sum(img_masked * kernel_cos)
-            im = np.sum(img_masked * kernel_sin)
-            features.append(np.sqrt(re * re + im * im))
-
-    return np.array(features)
-
-
-def _binarize_features(features, n_bits):
-    """将连续特征量化为 n_bits 二进制位 (中位阈值)"""
-    n_features = len(features)
-    if n_bits > n_features:
-        # 重复特征以达到需要的位数
-        repeats = (n_bits // n_features) + 1
-        features = np.tile(features, repeats)
-        n_features = len(features)
-    # 用滚动窗口中位数二值化
-    bits = np.zeros(n_bits, dtype=np.uint8)
-    chunk_size = n_features // n_bits
-    for i in range(n_bits):
-        chunk = features[i * chunk_size:(i + 1) * chunk_size]
-        median = np.median(chunk)
-        bits[i] = 1 if np.mean(chunk) > median else 0
-    return bits
-
-
-def zero_watermark_generate(img_array, watermark_bits):
-    """
-    PHFRFM 零水印生成 (文献1算法)
-    - 真正无损: 不修改原始图像
-    - 抗旋转: 旋转不变矩
-    - 抗缩放: 归一化极坐标
-    - 抗噪声: 量化时取局部中位
-    """
-    H, W = img_array.shape
-    features = _compute_phfrm_features(img_array)
-    n_bits = len(watermark_bits)
-    feature_bits = _binarize_features(features, n_bits)
-    # XOR 生成密钥
-    key = np.bitwise_xor(feature_bits, watermark_bits)
-    return key, feature_bits
-
-
-def zero_watermark_extract(img_array, key):
-    """PHFRFM 零水印提取"""
-    H, W = img_array.shape
-    features = _compute_phfrm_features(img_array)
-    n_bits = len(key)
-    feature_bits = _binarize_features(features, n_bits)
-    recovered = np.bitwise_xor(feature_bits, key)
-    return recovered.astype(np.uint8)
-
+# ─── 零水印（DFT 环形积分，无损；对温和亮度/对比度变化较稳，但不具几何攻击不变性）───
 
 def generate_diff_heatmap(original_array, watermarked_array):
     """
@@ -473,9 +347,10 @@ def zero_watermark_generate(img_array, watermark_bits):
     零水印生成: 提取图像特征 → XOR 水印 → 存储为密钥。
     不修改图像像素, 实现真正无损。
 
-    使用简化的极坐标矩特征:
+    使用 DFT 幅度谱的环形积分特征（非极坐标矩）:
     - 对图像做 DFT → 取幅度谱的环形积分作为特征
     - 对特征二值化 → 与水印 XOR → 得到密钥
+    注意: 该特征对旋转/裁剪/缩放不具不变性（实测 BER≈0.5），仅对温和亮度/对比度变化较稳。
     """
     H, W = img_array.shape
     fft = np.fft.fft2(img_array)
@@ -632,21 +507,17 @@ def embed_entire_watermark(img: Image.Image, did: str, mode="dft", alpha=0.08):
     返回: {watermarked_img, key, metrics, spectrum}
     """
     arr = _img_to_gray(img)
-    H, W = arr.shape
 
     H_img, W_img = arr.shape
-    secret_hash = hashlib.sm3(did.encode()).hexdigest() if hasattr(hashlib, 'sm3') else hashlib.sha256(did.encode()).hexdigest()
+    secret_hash = _wm_hash(did.encode())
 
-    # 基础编码：DID + hash 的原始比特（不重复）
+    # DFT 模式只嵌入 DID 明文比特（不重复、不携带 hash）。
+    # 设计取舍：DFT 幅度配对水印本就不抗旋转/裁剪，再塞 256 位 hash 只白白占用
+    # ~52% 负载，且提取端从未读取/校验这些 hash 位（之前是死重 + 假校验）。
+    # 若需哈希锚定，应在零水印/链上完成，而非挤进 DFT 负载。
     did_bytes = did.encode("utf-8")
     did_bits_list = list(np.unpackbits(np.frombuffer(did_bytes, dtype=np.uint8)))
-    if hasattr(hashlib, 'sm3'):
-        hash_hex = hashlib.sm3(did_bytes).hexdigest()
-    else:
-        hash_hex = hashlib.sha256(did_bytes).hexdigest()
-    hash_bytes = bytes.fromhex(hash_hex)
-    hash_bits_list = list(np.unpackbits(np.frombuffer(hash_bytes, dtype=np.uint8)))
-    unique_bits = np.array(did_bits_list + hash_bits_list, dtype=np.uint8)
+    unique_bits = np.array(did_bits_list, dtype=np.uint8)
     n_unique = len(unique_bits)
 
     result = {
@@ -695,12 +566,12 @@ def embed_entire_watermark(img: Image.Image, did: str, mode="dft", alpha=0.08):
     return result
 
 def extract_entire_watermark(img: Image.Image, params: dict):
-    repetitions = params.get("repetitions", 1)
     """
     完整水印提取流程
     params: 包含 mode, did_bit_len, key(零水印时) 等信息
     返回: {did, hash_verified, metrics, attack_results}
     """
+    repetitions = params.get("repetitions", 1)
     arr = _img_to_gray(img)
     mode = params.get("mode", "dft")
     did_bit_len = params.get("did_bit_len", 0)
@@ -757,8 +628,16 @@ def extract_entire_watermark(img: Image.Image, params: dict):
         did = did_bytes.decode("utf-8", errors="replace").rstrip("\x00")
         recovered_hash = ""
         expected_hash = ""
-        # 软匹配: DID 长度合理 且 包含 "did" 或 ":" (允许 1-2 字符错误)
-        hash_verified = (len(did) >= 10 and ("did" in did[:5] or ":" in did[:8]))
+        # DFT 模式不嵌入哈希（见 embed_entire_watermark），故 hash_verified 退化为
+        # DID 完整性校验（字段名保留以兼容前端 /api/watermark/extract 的判定逻辑）：
+        #   - 若提取参数带登记 DID（params["did"]），则做精确比对——这才是可信校验；
+        #   - 否则退化为「形似 DID」格式检查（长度达标且前缀含 did/':'）。
+        # 这不再是「任意 did 字样都算通过」的假校验，而是验证恢复的 DID 是否可信。
+        expected_did = params.get("did", "") or ""
+        if expected_did:
+            hash_verified = (did == expected_did)
+        else:
+            hash_verified = (len(did) >= 10 and ("did" in did[:5] or ":" in did[:8]))
     else:
         did, recovered_hash, expected_hash = decode_watermark_message(extracted_bits, did_bit_len)
         hash_verified = (recovered_hash == expected_hash)
@@ -830,38 +709,3 @@ def extract_entire_watermark(img: Image.Image, params: dict):
 
 
 
-# ========== Reed-Solomon 错误纠正 ==========
-try:
-    from reedsolo import RSCodec, ReedSolomonError
-
-    def _rs_encode_bits(bits, nsym=64):
-        """对水印比特做 RS 编码, 用于错误纠正。nsym=64 可纠 32 字节错误。
-        输入输出都是 bits 数组, RS 在字节级别操作。
-        """
-        # 转字节 (8 bits -> 1 byte)
-        n_bytes = (len(bits) + 7) // 8
-        byte_data = np.packbits(bits[:n_bytes * 8])
-        # RS 编码
-        rs = RSCodec(nsym)
-        encoded = rs.encode(byte_data.tobytes())
-        # 转回 bits
-        encoded_bits = np.unpackbits(np.frombuffer(encoded, dtype=np.uint8))
-        return encoded_bits, len(encoded)
-
-    def _rs_decode_bits(bits, original_len, nsym=64):
-        """对提取的 bits 做 RS 纠错。"""
-        n_bytes = (len(bits) + 7) // 8
-        byte_data = np.packbits(bits[:n_bytes * 8])
-        try:
-            rs = RSCodec(nsym)
-            decoded = rs.decode(byte_data.tobytes())[0]
-        except ReedSolomonError:
-            return None  # 错误太多, RS 纠不了
-        decoded_bits = np.unpackbits(np.frombuffer(decoded, dtype=np.uint8))
-        return decoded_bits[:original_len]
-except ImportError:
-    # 无 reedsolo 时用空实现
-    def _rs_encode_bits(bits, nsym=64):
-        return bits, len(bits)
-    def _rs_decode_bits(bits, original_len, nsym=64):
-        return bits[:original_len] if len(bits) >= original_len else None
