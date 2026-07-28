@@ -11,6 +11,7 @@ from core.pedersen import commit, verify_commitment
 from core.fingerprint import generate_fingerprint, verify_fingerprint, canonical_json
 from core.sm2_sign import generate_keypair, sign_string, verify as sm2_verify
 from core.did_manager import generate_did, create_on_chain_record
+from core.pedersen_zkp import compute_triple_hash, pedersen_commit as p256_commit
 from core.metadata_extractor import extract_metadata
 from core.vc_manager import request_credential, verify_credential, construct_presentation, verify_presentation, get_issuer_info, get_ca_directory, ca_store
 from core.issuer_ca import resolve_party_ca_link
@@ -79,9 +80,19 @@ def limit(f):
     return d
 
 with get_db() as db:
-    db.execute('''CREATE TABLE IF NOT EXISTS commitments(id INTEGER PRIMARY KEY AUTOINCREMENT, data_did TEXT UNIQUE, data_type TEXT, raw_data TEXT, algorithm TEXT DEFAULT 'SM3', fingerprint TEXT, commitment TEXT, randomness TEXT, owner_did TEXT, owner_key TEXT, chain_tx_id TEXT, block_height INTEGER, metadata TEXT, vc_id TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    db.execute('''CREATE TABLE IF NOT EXISTS commitments(id INTEGER PRIMARY KEY AUTOINCREMENT, data_did TEXT UNIQUE, data_type TEXT, raw_data TEXT, algorithm TEXT DEFAULT 'SM3', fingerprint TEXT, commitment TEXT, randomness TEXT, owner_did TEXT, owner_key TEXT, chain_tx_id TEXT, block_height INTEGER, metadata TEXT, vc_id TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, subject_did TEXT, triple_commitment TEXT, triple_randomness TEXT, triple_hash_x TEXT)''')
     db.execute('CREATE INDEX IF NOT EXISTS idx_did ON commitments(data_did)')
+    # 向后兼容：为已存在（旧 schema）的库补加任务1补齐项新增列（幂等）
+    for col in ('subject_did', 'triple_commitment', 'triple_randomness', 'triple_hash_x'):
+        try:
+            db.execute(f'ALTER TABLE commitments ADD COLUMN {col} TEXT')
+        except Exception:
+            pass
     db.commit()
+
+# Fail-closed 提交策略：链未回执时拒绝落库（默认开启；离线开发可设
+# TRUST_SUBMIT_REQUIRE_CHAIN=false 关闭，避免无链环境无法提交）。
+SUBMIT_REQUIRE_CHAIN = os.environ.get('TRUST_SUBMIT_REQUIRE_CHAIN', 'true').lower() != 'false'
 
 OWNER_KEYPAIR = generate_keypair()
 OWNER_DID = generate_did(entity_type='owner', seed=OWNER_KEYPAIR.get('private_key','')[:32])['did']
@@ -166,23 +177,37 @@ def api_submit():
     pb = get_party_binding(raw, meta)
     if pb:
         meta['_party_binding'] = pb
+    # 权属方 DID：优先绑定真实主体企业 DID（统一社会信用代码→主数据双向绑定），
+    # 仅当无法解析主体时回退为平台运营方 DID。使"元数据+指纹+权属方DID 完美绑定"
+    # 中的权属方主体在存证主链路显式落库（任务1 补齐项）。
+    subject_did = (pb.get('did') if pb and pb.get('did') else OWNER_DID)
     cmt_r = commit(fp); C = cmt_r['commitment']; r_val = str(cmt_r['nonce'])
     sig_r = sign_string(fp, OWNER_KEYPAIR['private_key']); sig = json.dumps(sig_r)
     did_r = generate_did(entity_type='data'); did = did_r['did']
+    # 三元组完美绑定（P-256 Pedersen）：x = SHA256(meta || fp || subject_did)，
+    # 与 VC 层一致，使主确权链路也兑现"元数据+指纹+权属方DID"算法绑定（任务1 补齐项）。
+    triple_x = compute_triple_hash(meta, fp, subject_did)
+    tcx, tcy, t_r = p256_commit(triple_x)
+    triple_commitment = f"{tcx},{tcy}"
     chain = store_on_chain(did, fp, C, sig, json.dumps(meta)); tx = chain.get('tx_id',''); bh = chain.get('block_height',0)
+    # Fail-closed：链未回执则拒绝落库，避免"提交成功但实际未上链"的虚假确认（任务1 补齐项）。
+    if SUBMIT_REQUIRE_CHAIN and not tx:
+        return jsonify({'success': False, 'error': '链上存证失败：提交未被区块链确认（fail-closed 已启用），数据未落库',
+                        'chain_error': chain.get('error',''), 'data_did': did}), 502
     with get_db() as db:
         from datetime import datetime
         ts = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%dT%H:%M:%S.%f+08:00')
-        db.execute('INSERT INTO commitments(data_did,data_type,raw_data,fingerprint,commitment,randomness,owner_did,owner_key,chain_tx_id,block_height,metadata,timestamp) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', (did,dtype,raw,fp,C,r_val,OWNER_DID,OWNER_KEYPAIR.get('public_key',''),tx,bh,json.dumps(meta),ts))
+        db.execute('INSERT INTO commitments(data_did,data_type,raw_data,fingerprint,commitment,randomness,owner_did,owner_key,chain_tx_id,block_height,metadata,timestamp,subject_did,triple_commitment,triple_randomness,triple_hash_x) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (did,dtype,raw,fp,C,r_val,OWNER_DID,OWNER_KEYPAIR.get('public_key',''),tx,bh,json.dumps(meta),ts,subject_did,triple_commitment,t_r,triple_x))
         db.commit()
     return jsonify({
         'success': True,
         'step1_extraction': {'method': 'NLP-NER + 模板匹配', 'confidence': 0.5, 'matched_fields': 5, 'total_fields': 10, 'meta': meta},
         'step2_fingerprint': {'fingerprint': fp, 'algorithm': 'SM3'},
         'step3_commitment': {'commitment': C},
+        'step3b_triple_binding': {'subject_did': subject_did, 'triple_commitment': triple_commitment, 'triple_hash_x': triple_x, 'algorithm': 'P-256 Pedersen(SHA256(x))'},
         'step4_onchain': {'data_did': did, 'fingerprint': fp, 'commitment': C, 'randomness': r_val, 'signature': sig, 'chain_tx_id': tx, 'block_height': bh},
         'step5_chainmaker': {'success': bool(tx), 'tx_id': tx, 'block_height': bh, 'contract': 'fact', 'method': 'save', 'error': chain.get('error','') if not tx else ''},
-        'data_did': did, 'fingerprint': fp, 'commitment': C, 'randomness': r_val, 'signature': sig, 'owner_did': OWNER_DID, 'chain_tx_id': tx, 'block_height': bh, 'algorithm': 'SM3', 'data_type': dtype, 'metadata': meta
+        'data_did': did, 'fingerprint': fp, 'commitment': C, 'randomness': r_val, 'signature': sig, 'owner_did': OWNER_DID, 'subject_did': subject_did, 'chain_tx_id': tx, 'block_height': bh, 'algorithm': 'SM3', 'data_type': dtype, 'metadata': meta, 'triple_commitment': triple_commitment, 'triple_hash_x': triple_x
     })
 
 @app.route('/api/verify', methods=['POST'])
@@ -291,6 +316,32 @@ def api_verify():
 
     all_ok = fp_v and cm_v and sg_v and ch_v
     failed = []
+    # 05 三元组完美绑定验证（任务1 补齐项）：x = SHA256(meta || fp || subject_did)，
+    # 用 P-256 Pedersen 重算承诺并与存证比对。历史记录（无 triple_commitment）标记"未启用"。
+    tb_v = None
+    tb_detail = {'valid': None, 'detail': '未启用三元组绑定（历史记录）'}
+    triple_c = (record.get('triple_commitment','') if record else '')
+    subject_did = (record.get('subject_did','') if record else '')
+    if triple_c and stored_fp and subject_did:
+        try:
+            _smeta = record.get('metadata')
+            if isinstance(_smeta, str):
+                try: _smeta = json.loads(_smeta)
+                except Exception: _smeta = {}
+            if not isinstance(_smeta, dict): _smeta = {}
+            _x = compute_triple_hash(_smeta, stored_fp, subject_did)
+            _t_r = record.get('triple_randomness','')
+            _tcx, _tcy, _ = p256_commit(_x, _t_r)
+            tb_v = (f"{_tcx},{_tcy}" == triple_c)
+            tb_detail = {'valid': tb_v,
+                         'detail': ('三元组绑定(元数据+指纹+权属方DID)一致' if tb_v else '三元组绑定不匹配'),
+                         'subject_did': subject_did}
+        except Exception as _e:
+            tb_v = False
+            tb_detail = {'valid': False, 'detail': '三元组绑定校验异常: ' + str(_e)[:120]}
+    if tb_v is not None:
+        all_ok = all_ok and tb_v
+        if not tb_v: failed.append('三元组绑定')
     if not fp_v: failed.append('指纹')
     if not cm_v: failed.append('承诺')
     if not sg_v: failed.append('签名')
@@ -311,12 +362,14 @@ def api_verify():
             'commitment_verified': cm_v,
             'signature_verified': sg_v,
             'chain_verified': ch_v,
+            'triple_binding_verified': (tb_v if tb_v is not None else None),
         },
         'details': {
             'fingerprint': fp_detail,
             'commitment': cm_detail,
             'signature': sg_detail,
             'chain': ch_detail,
+            'triple_binding': tb_detail,
         },
     })
 
