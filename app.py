@@ -10,7 +10,7 @@ from PIL import Image
 from core.pedersen import commit, verify_commitment
 from core.fingerprint import generate_fingerprint, verify_fingerprint, canonical_json
 from core.sm2_sign import generate_keypair, sign_string, verify as sm2_verify
-from core.did_manager import generate_did, create_on_chain_record
+from core.did_manager import generate_did, create_on_chain_record, party_did, issuer_did
 from core.pedersen_zkp import compute_triple_hash, pedersen_commit as p256_commit
 from core.metadata_extractor import extract_metadata
 from core.vc_manager import request_credential, verify_credential, construct_presentation, verify_presentation, get_issuer_info, get_ca_directory, ca_store
@@ -88,6 +88,19 @@ with get_db() as db:
             db.execute(f'ALTER TABLE commitments ADD COLUMN {col} TEXT')
         except Exception:
             pass
+    # 任务书子目标1 全生命周期补齐：DID 注册表 / VC 撤销状态 / VP 签发日志（幂等建表）
+    db.execute('''CREATE TABLE IF NOT EXISTS did_registry(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, did TEXT UNIQUE NOT NULL,
+        credit_code TEXT, name TEXT, role TEXT, region TEXT, issuer_id TEXT,
+        controller TEXT, status TEXT DEFAULT 'active', revoke_reason TEXT,
+        revoked_at TEXT, created TEXT, updated TEXT)''')
+    db.execute('''CREATE TABLE IF NOT EXISTS vc_status(
+        vc_id TEXT PRIMARY KEY, status TEXT DEFAULT 'active',
+        reason TEXT, revoked_at TEXT, created TEXT)''')
+    db.execute('''CREATE TABLE IF NOT EXISTS vp_log(
+        id INTEGER PRIMARY KEY AUTOINCREMENT, vp_id TEXT UNIQUE, holder TEXT,
+        disclosure TEXT, modules TEXT, disclosed_fields TEXT, challenge TEXT,
+        domain TEXT, vc_ids TEXT, created TEXT)''')
     db.commit()
 
 # Fail-closed 提交策略：链未回执时拒绝落库（默认开启；离线开发可设
@@ -97,6 +110,22 @@ SUBMIT_REQUIRE_CHAIN = os.environ.get('TRUST_SUBMIT_REQUIRE_CHAIN', 'true').lowe
 OWNER_KEYPAIR = generate_keypair()
 OWNER_DID = generate_did(entity_type='owner', seed=OWNER_KEYPAIR.get('private_key','')[:32])['did']
 OWNER_NAME = 'XX生态养殖场'
+
+def _now_beijing():
+    """返回北京时间 ISO 字符串（+08:00），与既有提交时间戳风格一致。"""
+    return (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%dT%H:%M:%S+08:00')
+
+def vc_revoked(vc_id):
+    """查询 VC 撤销状态；无记录视为 active。返回 (revoked, reason, revoked_at)。"""
+    try:
+        con = sqlite3.connect(DB_PATH); con.row_factory = sqlite3.Row
+        r = con.cursor().execute('SELECT status, reason, revoked_at FROM vc_status WHERE vc_id=?', (vc_id,)).fetchone()
+        con.close()
+        if r and r['status'] == 'revoked':
+            return True, r['reason'], r['revoked_at']
+    except Exception:
+        pass
+    return False, None, None
 
 def records_to_list(rows):
     result = []
@@ -1308,7 +1337,19 @@ def api_vc():
 @require_key
 @require_csrf
 def api_vc_verify():
-    return jsonify(verify_credential((request.get_json() or {}).get('vc', {})))
+    vc = (request.get_json() or {}).get('vc', {})
+    res = verify_credential(vc)
+    # 撤销状态校验（任务书子目标1：VC 撤销）
+    vc_id = vc.get('id')
+    if vc_id:
+        revoked, reason, at = vc_revoked(vc_id)
+        if revoked:
+            res['valid'] = False
+            res.setdefault('errors', []).append('凭证已被撤销(VC Revoked)：' + (reason or ''))
+            res['revoked'] = True
+            res['revoke_reason'] = reason
+            res['revoked_at'] = at
+    return jsonify(res)
 
 @app.route('/api/vp/construct', methods=['POST'])
 @require_key
@@ -1317,21 +1358,71 @@ def api_vp_construct():
     d = request.get_json() or {}
     vc = d.get('vc') or d.get('credentials')
     if isinstance(vc, list): vc = vc[0] if vc else None
-    return jsonify(construct_presentation(
+    vp = construct_presentation(
         vc,
         modules=d.get('modules'),
         challenge=d.get('challenge'),
         domain=d.get('domain'),
         disclose_fields=d.get('disclose_fields'),
-    ))
+    )
+    # VP 签发日志（任务书子目标1：VP 查询）——仅对合法生成的 VP 落库
+    if isinstance(vp, dict) and vp.get('id') and vp.get('id') != 'vp:error':
+        try:
+            vcs = vp.get('verifiableCredential', []) or []
+            vc_ids = ','.join([v.get('id', '') for v in vcs if v.get('id')])
+            con = sqlite3.connect(DB_PATH)
+            con.execute('INSERT OR IGNORE INTO vp_log(vp_id,holder,disclosure,modules,disclosed_fields,challenge,domain,vc_ids,created) VALUES(?,?,?,?,?,?,?,?,?)',
+                        (vp.get('id'), vp.get('holder'), vp.get('disclosure'),
+                         json.dumps(vp.get('modules', []), ensure_ascii=False),
+                         json.dumps(vp.get('disclosed_fields') or [], ensure_ascii=False),
+                         vp.get('challenge'), vp.get('domain'), vc_ids, _now_beijing()))
+            con.commit(); con.close()
+        except Exception:
+            pass
+    return jsonify(vp)
 
 @app.route('/api/vp/verify', methods=['POST'])
 @require_key
 @require_csrf
 def api_vp_verify():
-    return jsonify(verify_presentation((request.get_json() or {}).get('vp', {})))
+    vp = (request.get_json() or {}).get('vp', {})
+    res = verify_presentation(vp)
+    # 内嵌 VC 撤销状态校验（任务书子目标1：VP 携带的 VC 被撤销则整体失效）
+    for v in (vp.get('verifiableCredential', []) or []):
+        vid = v.get('id') if isinstance(v, dict) else None
+        if vid:
+            revoked, reason, at = vc_revoked(vid)
+            if revoked:
+                res['valid'] = False
+                res.setdefault('errors', []).append('内嵌凭证 %s 已被撤销(VC Revoked)：%s' % (vid, reason or ''))
+    return jsonify(res)
 
 CREDIT_RE = re.compile(r"(?:统一社会信用代码|信用代码|养殖场代码)[:：]\s*([0-9A-Z]{18})")
+
+
+def load_registered_parties():
+    """读取 did_registry 中已登记（含已注销）主体，补充到主数据目录（与种子主体同构）。"""
+    out = []
+    try:
+        con = sqlite3.connect(DB_PATH); con.row_factory = sqlite3.Row
+        cur = con.cursor()
+        cur.execute("SELECT did, credit_code, name, role, region, issuer_id, status FROM did_registry")
+        for r in cur.fetchall():
+            out.append({
+                "role": r["role"] or "party",
+                "name": r["name"],
+                "credit_code": r["credit_code"],
+                "did": r["did"],
+                "region": r["region"] or "",
+                "registered": r["status"] == "active",
+                "did_status": r["status"],
+                "did_revoked": r["status"] == "revoked",
+                "history": False,
+            })
+        con.close()
+    except Exception:
+        pass
+    return out
 
 
 def get_seed_parties():
@@ -1353,6 +1444,13 @@ def get_seed_parties():
         {"role": "vet", "name": "XX市畜牧兽医检疫站", "did": "did:trust:livestock:party:vet_station_a:xx", "region": "华北"},
         {"role": "vet", "name": "YY区动物卫生监督所", "did": "did:trust:livestock:party:vet_station_a:yy", "region": "华东"},
     ]
+    # 合并 did_registry 中已登记（含已注销）主体，使 /api/did/register 落地后
+    # 可在主数据目录、提交绑定、CA 解析中生效（闭环验证 DID 注册真实可用）。
+    _by_code = {p.get("credit_code") for p in seeds if p.get("credit_code")}
+    for rp in load_registered_parties():
+        if rp.get("credit_code") and rp["credit_code"] in _by_code:
+            continue
+        seeds.append(rp)
     try:
         con = sqlite3.connect(DB_PATH); con.row_factory = sqlite3.Row
         cur = con.cursor()
@@ -1397,9 +1495,11 @@ def get_party_binding(raw, meta):
         _link = resolve_party_ca_link(party.get("did"))
         return {"code": code, "name": party.get("name"), "did": party.get("did"),
                 "role": party.get("role"), "registered": True,
+                "did_revoked": bool(party.get("did_revoked")),
                 "ca_linked": _link["ca_linked"], "ca_issuer": _link["ca_issuer"],
                 "ca_name": _link["ca_name"], "ca_reason": _link["ca_reason"]}
     return {"code": code, "name": None, "did": None, "role": "unknown", "registered": False,
+            "did_revoked": False,
             "ca_linked": False, "ca_issuer": None, "ca_name": None, "ca_reason": "no_party"}
 
 
@@ -1440,7 +1540,8 @@ def lookup_party(code=None, name=None, did=None):
     except Exception:
         pass
     return {"found": found, "party": party, "did_bound": did_bound,
-            "registered": registered, "ca_linked": ca_linked,
+            "registered": registered, "did_revoked": bool(party and party.get("did_revoked")),
+            "ca_linked": ca_linked,
             "ca_issuer": ca_issuer, "ca_name": ca_name, "ca_reason": ca_reason,
             "records_count": records_count}
 
@@ -1467,6 +1568,194 @@ def api_party_lookup():
     name = (request.args.get('name') or '').strip()
     did = (request.args.get('did') or '').strip()
     return jsonify(lookup_party(code=code, name=name, did=did))
+
+
+# ============ DID 全生命周期管理（任务书子目标1：注册/注销/查询/修改） ============
+def _did_doc_from_row(r):
+    """将 did_registry 行映射为 W3C 风格的 DID Document（含状态与注销信息）。"""
+    return {
+        "did": r["did"], "credit_code": r["credit_code"], "name": r["name"],
+        "role": r["role"], "region": r["region"], "issuer_id": r["issuer_id"],
+        "controller": r["controller"], "status": r["status"],
+        "revoke_reason": r["revoke_reason"], "revoked_at": r["revoked_at"],
+        "created": r["created"], "updated": r["updated"],
+    }
+
+
+@app.route('/api/did/register', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_did_register():
+    """畜牧企业 DID 注册：信用代码 → 强绑定命名空间 DID（did:trust:livestock:party:<issuer>:<short>）。"""
+    body = request.get_json(silent=True) or {}
+    credit_code = (body.get('credit_code') or '').strip()
+    name = (body.get('name') or '').strip()
+    role = (body.get('role') or 'farm').strip()
+    region = (body.get('region') or '').strip()
+    issuer_id = (body.get('issuer_id') or 'livestock_authority_001').strip()
+    if not re.match(r'^[0-9A-Z]{18}$', credit_code):
+        return jsonify({'success': False, 'error': '统一社会信用代码格式非法（应为 18 位大写字母/数字）'}), 400
+    if not name:
+        return jsonify({'success': False, 'error': '主体名称不能为空'}), 400
+    # 发行方必须已在 CA 信任锚注册且有效，落实 CA 强绑定（与 VC 签发一致）
+    issuer_did_str = issuer_did(issuer_id)
+    _cert = ca_store.get_cert(issuer_did_str)
+    if not _cert or _cert.get('status') != 'valid':
+        return jsonify({'success': False, 'error': '签发机构(%s) 未在信任锚注册或已失效，拒绝登记' % issuer_did_str}), 400
+    # 同一信用代码 → 同一 short → 同一 DID（幂等：重复登记稳定命中）
+    short = hashlib.sha256(credit_code.encode()).hexdigest()[:6]
+    did = party_did(issuer_id, short)
+    with get_db() as db:
+        exist = db.execute('SELECT did FROM did_registry WHERE credit_code=? OR did=?', (credit_code, did)).fetchone()
+        if exist:
+            return jsonify({'success': False, 'error': '该信用代码或 DID 已登记', 'did': exist['did']}), 409
+        now = _now_beijing()
+        db.execute('INSERT INTO did_registry(did,credit_code,name,role,region,issuer_id,controller,status,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                   (did, credit_code, name, role, region, issuer_id, issuer_did_str, 'active', now, now))
+        db.commit()
+        row = db.execute('SELECT * FROM did_registry WHERE did=?', (did,)).fetchone()
+    return jsonify({'success': True, 'did_document': _did_doc_from_row(row), 'message': 'DID 注册成功'})
+
+
+@app.route('/api/did/revoke', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_did_revoke():
+    """畜牧企业 DID 注销（状态置为 revoked，保留撤销原因与时间，DID 标识本身不可变）。"""
+    body = request.get_json(silent=True) or {}
+    did = (body.get('did') or '').strip()
+    code = (body.get('credit_code') or '').strip()
+    reason = (body.get('reason') or '主体主动注销').strip()
+    if not did and not code:
+        return jsonify({'success': False, 'error': '需提供 did 或 credit_code'}), 400
+    with get_db() as db:
+        if did:
+            row = db.execute('SELECT * FROM did_registry WHERE did=?', (did,)).fetchone()
+        else:
+            row = db.execute('SELECT * FROM did_registry WHERE credit_code=?', (code,)).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'DID 未登记'}), 404
+        now = _now_beijing()
+        db.execute('UPDATE did_registry SET status=?, revoke_reason=?, revoked_at=?, updated=? WHERE did=?',
+                   ('revoked', reason, now, now, row['did']))
+        db.commit()
+        row = db.execute('SELECT * FROM did_registry WHERE did=?', (row['did'],)).fetchone()
+    return jsonify({'success': True, 'did_document': _did_doc_from_row(row), 'message': 'DID 已注销'})
+
+
+@app.route('/api/did/update', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_did_update():
+    """畜牧企业 DID 信息修改：仅可变属性（名称/地区/角色），DID 标识本身不可改。"""
+    body = request.get_json(silent=True) or {}
+    did = (body.get('did') or '').strip()
+    if not did:
+        return jsonify({'success': False, 'error': '需提供 did'}), 400
+    name = (body.get('name') or '').strip()
+    region = (body.get('region') or '').strip()
+    role = (body.get('role') or '').strip()
+    with get_db() as db:
+        row = db.execute('SELECT * FROM did_registry WHERE did=?', (did,)).fetchone()
+        if not row:
+            return jsonify({'success': False, 'error': 'DID 未登记'}), 404
+        if row['status'] == 'revoked':
+            return jsonify({'success': False, 'error': '已注销的 DID 不可修改'}), 400
+        now = _now_beijing()
+        # 仅当传入非空时才覆盖；传空串则保留原值（COALESCE(NULLIF) 技巧）
+        db.execute('UPDATE did_registry SET name=COALESCE(NULLIF(?,\'\'),name), '
+                   'region=COALESCE(NULLIF(?,\'\'),region), role=COALESCE(NULLIF(?,\'\'),role), updated=? WHERE did=?',
+                   (name, region, role, now, did))
+        db.commit()
+        row = db.execute('SELECT * FROM did_registry WHERE did=?', (did,)).fetchone()
+    return jsonify({'success': True, 'did_document': _did_doc_from_row(row), 'message': 'DID 信息已更新'})
+
+
+@app.route('/api/did/query')
+def api_did_query():
+    """畜牧企业 DID 查询：优先查 did_registry，回退到主数据种子目录（含 CA 强绑定解析）。"""
+    did = (request.args.get('did') or '').strip()
+    code = (request.args.get('code') or '').strip()
+    name = (request.args.get('name') or '').strip()
+    with get_db() as db:
+        if did:
+            row = db.execute('SELECT * FROM did_registry WHERE did=?', (did,)).fetchone()
+        elif code:
+            row = db.execute('SELECT * FROM did_registry WHERE credit_code=?', (code,)).fetchone()
+        else:
+            row = None
+        if row:
+            doc = _did_doc_from_row(row)
+            doc['registered'] = True
+            doc['source'] = 'did_registry'
+            return jsonify({'success': True, 'did_document': doc, 'found': True})
+    # 回退到种子目录（含 CA 强绑定解析）
+    res = lookup_party(code=code, name=name, did=did)
+    if res.get('found'):
+        party = res.get('party') or {}
+        doc = {
+            'did': party.get('did'), 'credit_code': party.get('credit_code'),
+            'name': party.get('name'), 'role': party.get('role'),
+            'region': party.get('region'), 'status': 'active' if res.get('registered') else 'unregistered',
+            'registered': res.get('registered'), 'did_revoked': res.get('did_revoked'),
+            'ca_linked': res.get('ca_linked'), 'ca_issuer': res.get('ca_issuer'),
+            'ca_name': res.get('ca_name'), 'ca_reason': res.get('ca_reason'),
+            'source': 'seed_directory',
+        }
+        return jsonify({'success': True, 'did_document': doc, 'found': True})
+    return jsonify({'success': False, 'error': '未找到匹配的 DID', 'found': False}), 404
+
+
+# ============ VC 撤销（任务书子目标1：VC 撤销 + verify 状态校验） ============
+@app.route('/api/vc/revoke', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_vc_revoke():
+    """撤销指定 VC（按 vc_id 记录状态）；撤销后 /api/vc/verify 与内嵌该 VC 的 /api/vp/verify 将判失败。"""
+    body = request.get_json(silent=True) or {}
+    vc_id = (body.get('vc_id') or '').strip()
+    reason = (body.get('reason') or '凭证撤销').strip()
+    if not vc_id:
+        return jsonify({'success': False, 'error': '需提供 vc_id'}), 400
+    with get_db() as db:
+        now = _now_beijing()
+        db.execute('INSERT INTO vc_status(vc_id,status,reason,revoked_at,created) VALUES(?,?,?,?,?) '
+                   'ON CONFLICT(vc_id) DO UPDATE SET status=excluded.status, reason=excluded.reason, revoked_at=excluded.revoked_at',
+                   (vc_id, 'revoked', reason, now, now))
+        db.commit()
+        row = db.execute('SELECT * FROM vc_status WHERE vc_id=?', (vc_id,)).fetchone()
+    return jsonify({'success': True, 'vc_id': vc_id, 'status': row['status'],
+                    'reason': row['reason'], 'revoked_at': row['revoked_at'], 'message': 'VC 已撤销'})
+
+
+# ============ VP 签发日志查询（任务书子目标1：VP 查询） ============
+@app.route('/api/vp/query')
+def api_vp_query():
+    """查询已签发的 VP 日志：按 vp_id 精确查，或按 holder 列出其全部 VP 表达。"""
+    vp_id = (request.args.get('vp_id') or '').strip()
+    holder = (request.args.get('holder') or '').strip()
+    with get_db() as db:
+        if vp_id:
+            rows = db.execute('SELECT * FROM vp_log WHERE vp_id=?', (vp_id,)).fetchall()
+        elif holder:
+            rows = db.execute('SELECT * FROM vp_log WHERE holder=? ORDER BY created DESC', (holder,)).fetchall()
+        else:
+            rows = db.execute('SELECT * FROM vp_log ORDER BY created DESC LIMIT 200').fetchall()
+        items = []
+        for r in rows:
+            items.append({
+                'vp_id': r['vp_id'], 'holder': r['holder'], 'disclosure': r['disclosure'],
+                'modules': json.loads(r['modules']) if r['modules'] else [],
+                'disclosed_fields': json.loads(r['disclosed_fields']) if r['disclosed_fields'] else [],
+                'challenge': r['challenge'], 'domain': r['domain'],
+                'vc_ids': (r['vc_ids'].split(',') if r['vc_ids'] else []),
+                'created': r['created'],
+            })
+    return jsonify({'success': True, 'count': len(items), 'vp_logs': items})
 
 
 if __name__ == '__main__':
