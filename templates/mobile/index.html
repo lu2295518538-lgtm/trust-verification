@@ -233,6 +233,88 @@
       <div class="json" id="v-json-out" style="display:none"></div>
     </div>
   </section>
+
+  <!-- ============ DID 管理 ============ -->
+  <section class="panel" id="panel-did">
+    <div class="card">
+      <h2><span class="dot"></span>注册 DID</h2>
+      <label class="fld">统一社会信用代码 *（18 位）</label>
+      <input id="m-did-credit" placeholder="如 91110000MA01ABCD23" maxlength="18">
+      <label class="fld">主体名称 *</label>
+      <input id="m-did-name" placeholder="如 XX生态养殖场">
+      <div class="row2">
+        <div><label class="fld">角色</label>
+          <select id="m-did-role">
+            <option value="farm" selected>养殖场</option>
+            <option value="slaughter">屠宰场</option>
+            <option value="vet">官方兽医</option>
+            <option value="unknown">其他</option>
+          </select>
+        </div>
+        <div><label class="fld">区域</label><input id="m-did-region" placeholder="如 内蒙古"></div>
+      </div>
+      <label class="fld">背书签发机构 issuer_id</label>
+      <input id="m-did-issuer" value="livestock_authority_001">
+      <button class="btn" id="m-did-reg-btn" onclick="mDidRegister()">注册 DID</button>
+      <div class="status" id="m-did-reg-out">待操作</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>注销 / 更新 DID</h2>
+      <label class="fld">目标 DID 或信用代码 *</label>
+      <input id="m-did-target" placeholder="did:trust:livestock:party:... 或 18 位代码">
+      <label class="fld">注销原因</label>
+      <input id="m-did-revoke-reason" value="主体主动注销">
+      <button class="btn warn" id="m-did-rev-btn" onclick="mDidRevoke()">注销 DID</button>
+      <div class="status" id="m-did-rev-out">待操作</div>
+      <div class="hint" style="margin-top:10px">更新可变信息（留空保留原值）</div>
+      <label class="fld">新名称</label><input id="m-did-upd-name" placeholder="可选">
+      <label class="fld">新区域</label><input id="m-did-upd-region" placeholder="可选">
+      <label class="fld">新角色</label>
+      <select id="m-did-upd-role">
+        <option value="">— 可选 —</option>
+        <option value="farm">养殖场</option>
+        <option value="slaughter">屠宰场</option>
+        <option value="vet">官方兽医</option>
+        <option value="unknown">其他</option>
+      </select>
+      <button class="btn sec" id="m-did-upd-btn" onclick="mDidUpdate()">更新信息</button>
+      <div class="status" id="m-did-upd-out">待操作</div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>查询 DID</h2>
+      <label class="fld">按 DID 查询</label>
+      <input id="m-did-q-did" placeholder="did:trust:livestock:party:...">
+      <label class="fld">或按信用代码查询</label>
+      <input id="m-did-q-code" placeholder="18 位代码">
+      <label class="fld">或按名称查询</label>
+      <input id="m-did-q-name" placeholder="主体名称（回退种子目录）">
+      <button class="btn" id="m-did-q-btn" onclick="mDidQuery()">查询</button>
+      <div class="status" id="m-did-q-out">待操作</div>
+      <div class="json" id="m-did-q-json" style="display:none"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="dot"></span>VC 撤销 &amp; VP 查询</h2>
+      <label class="fld">目标 VC ID（可留空用当前凭证）</label>
+      <input id="m-vc-revoke-id" placeholder="如 vc:abcd1234ef5678">
+      <label class="fld">撤销原因</label>
+      <input id="m-vc-revoke-reason" value="凭证撤销">
+      <button class="btn warn" id="m-vc-rev-btn" onclick="mRevokeVC()">撤销 VC</button>
+      <div class="status" id="m-vc-rev-out">待操作</div>
+      <div class="hint" style="margin-top:10px">VP 表达查询</div>
+      <label class="fld">VP ID（可选）</label>
+      <input id="m-vp-q-id" placeholder="如 vp:abcd1234ef5678">
+      <label class="fld">持有者 DID（可选）</label>
+      <input id="m-vp-q-holder" placeholder="did:chainmaker:holder:...">
+      <div class="row2" style="margin-top:6px">
+        <button class="btn sec" id="m-vp-q-btn" onclick="mQueryVP(false)">查询</button>
+        <button class="btn sec" id="m-vp-q-all-btn" onclick="mQueryVP(true)">查询全部</button>
+      </div>
+      <div class="json" id="m-vp-q-json" style="display:none"></div>
+    </div>
+  </section>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -273,8 +355,10 @@ async function securePost(url, body){
 function switchTab(name){
   $("tab-issue").classList.toggle("active", name==="issue");
   $("tab-verify").classList.toggle("active", name==="verify");
+  $("tab-did").classList.toggle("active", name==="did");
   $("panel-issue").classList.toggle("active", name==="issue");
   $("panel-verify").classList.toggle("active", name==="verify");
+  $("panel-did").classList.toggle("active", name==="did");
   if(name==="verify"){ readVerifyDeepLink(); }
 }
 function setScanMode(mode, btn){
@@ -639,6 +723,113 @@ async function showBatchChain(){
   }catch(e){
     box.innerHTML = '<div class="status err">查询失败：' + esc((e && e.message) || e) + '</div>';
   }
+}
+
+/* ─── DID 管理 · 任务书子目标1 移动端（对齐 /api/did/* & /api/vc/revoke & /api/vp/query）─── */
+function mSetStatus(id, msg, type){ var e = $(id); if(!e) return; e.className = "status" + (type?(" "+type):""); e.textContent = msg; }
+
+async function mDidRegister(){
+  var credit = $("m-did-credit").value.trim();
+  var name = $("m-did-name").value.trim();
+  var role = $("m-did-role").value;
+  var region = $("m-did-region").value.trim();
+  var issuer = $("m-did-issuer").value.trim() || "livestock_authority_001";
+  if(!/^[0-9A-Z]{18}$/.test(credit)){ mSetStatus("m-did-reg-out","信用代码格式非法（18 位大写字母/数字）","err"); return; }
+  if(!name){ mSetStatus("m-did-reg-out","主体名称不能为空","err"); return; }
+  $("m-did-reg-btn").disabled = true; $("m-did-reg-btn").textContent = "注册中…";
+  try{
+    var d = await securePost("/api/did/register", { credit_code: credit, name: name, role: role, region: region, issuer_id: issuer });
+    if(d && d.success){ mSetStatus("m-did-reg-out","✅ 注册成功：" + ((d.did_document && d.did_document.did) || ""), "ok"); }
+    else { mSetStatus("m-did-reg-out","❌ " + ((d && d.error) || "未知错误"), "err"); }
+  }catch(e){ mSetStatus("m-did-reg-out","异常：" + ((e&&e.message)||e), "err"); }
+  finally{ $("m-did-reg-btn").disabled = false; $("m-did-reg-btn").textContent = "注册 DID"; }
+}
+
+async function mDidRevoke(){
+  var target = $("m-did-target").value.trim();
+  var reason = $("m-did-revoke-reason").value.trim() || "主体主动注销";
+  if(!target){ mSetStatus("m-did-rev-out","需提供 DID 或信用代码","err"); return; }
+  var body = target.indexOf("did:") === 0 ? { did: target, reason: reason } : { credit_code: target, reason: reason };
+  $("m-did-rev-btn").disabled = true; $("m-did-rev-btn").textContent = "注销中…";
+  try{
+    var d = await securePost("/api/did/revoke", body);
+    if(d && d.success){ mSetStatus("m-did-rev-out","✅ 已注销：" + ((d.did_document && d.did_document.did) || target), "ok"); }
+    else { mSetStatus("m-did-rev-out","❌ " + ((d && d.error) || "未知错误"), "err"); }
+  }catch(e){ mSetStatus("m-did-rev-out","异常：" + ((e&&e.message)||e), "err"); }
+  finally{ $("m-did-rev-btn").disabled = false; $("m-did-rev-btn").textContent = "注销 DID"; }
+}
+
+async function mDidUpdate(){
+  var did = $("m-did-target").value.trim();
+  var name = $("m-did-upd-name").value.trim();
+  var region = $("m-did-upd-region").value.trim();
+  var role = $("m-did-upd-role").value;
+  if(!did || did.indexOf("did:") !== 0){ mSetStatus("m-did-upd-out","请在「注销/更新」填入 DID 后再更新","err"); return; }
+  $("m-did-upd-btn").disabled = true; $("m-did-upd-btn").textContent = "更新中…";
+  try{
+    var d = await securePost("/api/did/update", { did: did, name: name, region: region, role: role });
+    if(d && d.success){ mSetStatus("m-did-upd-out","✅ 信息已更新：" + did, "ok"); }
+    else { mSetStatus("m-did-upd-out","❌ " + ((d && d.error) || "未知错误"), "err"); }
+  }catch(e){ mSetStatus("m-did-upd-out","异常：" + ((e&&e.message)||e), "err"); }
+  finally{ $("m-did-upd-btn").disabled = false; $("m-did-upd-btn").textContent = "更新信息"; }
+}
+
+async function mDidQuery(){
+  var did = $("m-did-q-did").value.trim();
+  var code = $("m-did-q-code").value.trim();
+  var name = $("m-did-q-name").value.trim();
+  var out = $("m-did-q-out"), box = $("m-did-q-json");
+  box.style.display = "none";
+  if(!did && !code && !name){ mSetStatus("m-did-q-out","请输入 DID / 信用代码 / 名称 之一","err"); return; }
+  var qs = [did?("did="+encodeURIComponent(did)):"", code?("code="+encodeURIComponent(code)):"", name?("name="+encodeURIComponent(name)):""].filter(Boolean).join("&");
+  try{
+    var r = await fetch("/api/did/query?" + qs).then(function(x){return x.json();});
+    if(r && r.success){
+      var dd = r.did_document || {};
+      var parts = ["来源：" + (dd.source||"—"), "状态：" + (dd.status||"—")];
+      if(dd.ca_linked) parts.push("🔗 已 CA 强绑定（" + (dd.ca_name||dd.ca_issuer||"") + "）");
+      else if(dd.registered === false) parts.push("⚠ 尚未登记（种子目录回退）");
+      else if(dd.ca_reason) parts.push("⚠ 未强绑定：" + dd.ca_reason);
+      if(dd.did_revoked) parts.push("⚠ 该主体 DID 已注销");
+      mSetStatus("m-did-q-out", parts.join(" · "), "ok");
+      box.textContent = JSON.stringify(r.did_document, null, 2);
+      box.style.display = "block";
+    } else {
+      mSetStatus("m-did-q-out","❌ " + ((r && r.error) || "未找到"), "err");
+    }
+  }catch(e){ mSetStatus("m-did-q-out","异常：" + ((e&&e.message)||e), "err"); }
+}
+
+async function mRevokeVC(){
+  var vcId = $("m-vc-revoke-id").value.trim();
+  if(!vcId && state.lastVC && state.lastVC.id) vcId = state.lastVC.id;
+  var reason = $("m-vc-revoke-reason").value.trim() || "凭证撤销";
+  if(!vcId){ mSetStatus("m-vc-rev-out","请填写 VC ID，或先在「现场出证」生成凭证","err"); return; }
+  $("m-vc-rev-btn").disabled = true; $("m-vc-rev-btn").textContent = "撤销中…";
+  try{
+    var d = await securePost("/api/vc/revoke", { vc_id: vcId, reason: reason });
+    if(d && d.success){ mSetStatus("m-vc-rev-out","✅ VC 已撤销：" + vcId, "ok"); }
+    else { mSetStatus("m-vc-rev-out","❌ " + ((d && d.error) || "未知错误"), "err"); }
+  }catch(e){ mSetStatus("m-vc-rev-out","异常：" + ((e&&e.message)||e), "err"); }
+  finally{ $("m-vc-rev-btn").disabled = false; $("m-vc-rev-btn").textContent = "撤销 VC"; }
+}
+
+async function mQueryVP(all){
+  var id = $("m-vp-q-id").value.trim();
+  var holder = $("m-vp-q-holder").value.trim();
+  var box = $("m-vp-q-json");
+  if(!all && !id && !holder){ box.style.display="block"; box.textContent = "请输入 VP ID 或持有者 DID（或点「查询全部」）"; return; }
+  try{
+    var qs = all ? "" : (id ? ("vp_id="+encodeURIComponent(id)) : ("holder="+encodeURIComponent(holder)));
+    var r = await fetch("/api/vp/query" + (qs ? ("?"+qs) : "")).then(function(x){return x.json();});
+    if(r && r.success){
+      box.textContent = "共 " + r.count + " 条 VP 日志\n\n" + JSON.stringify(r.vp_logs, null, 2);
+      box.style.display = "block";
+    } else {
+      box.textContent = "查询失败：" + ((r && r.error) || "HTTP");
+      box.style.display = "block";
+    }
+  }catch(e){ box.textContent = "查询异常：" + ((e&&e.message)||e); box.style.display = "block"; }
 }
 
 /* 若以 deep link 打开（如 /m/#verify?vc=...）自动核验 */

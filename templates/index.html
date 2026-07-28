@@ -780,6 +780,7 @@ body {
       <li><a class="nav-item" data-target="sec-transport" href="#transport"><span class="nav-label">运输管理</span></a></li>
       <li><a class="nav-item" data-target="sec-vcvp" href="#vcvp"><span class="nav-label">VC·VP</span></a></li>
       <li><a class="nav-item" data-target="sec-ca" href="#ca"><span class="nav-label">签发者目录</span></a></li>
+      <li><a class="nav-item" data-target="sec-did" href="#did"><span class="nav-label">DID 管理</span></a></li>
     </ul>
     <div class="sidebar-footer">
       SM3 · SM2 · Pedersen<br>长安链可信验证
@@ -1431,6 +1432,45 @@ inspector: 张XX</textarea>
     </div>
   </div>
 
+  <!-- VC 撤销 / VP 查询 管理（任务书子目标1：VC 撤销 + VP 查询） -->
+  <div class="vc-mgmt-head">凭证生命周期管理 · VC 撤销 &amp; VP 查询</div>
+  <div class="vc-demo-grid" id="vc-mgmt-grid">
+    <div class="vc-demo-card">
+      <h3><span class="badge-num">3</span> VC 撤销（凭证状态管理）</h3>
+      <div class="vc-hint">撤销后该 VC 的后续验证，与内嵌该 VC 的 VP 验证，均将判失败。</div>
+      <div class="field">
+        <label class="field-label" for="vc-revoke-id">目标 VC ID</label>
+        <input class="input" id="vc-revoke-id" placeholder="如 vc:abcd1234ef5678（留空则撤销当前已生成的 VC）">
+      </div>
+      <div class="field">
+        <label class="field-label" for="vc-revoke-reason">撤销原因</label>
+        <input class="input" id="vc-revoke-reason" value="凭证撤销">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-warn btn-sm" onclick="revokeVC()">撤销 VC</button>
+      </div>
+      <div class="verify-result" id="vc-revoke-output" style="display:none;"></div>
+    </div>
+
+    <div class="vc-demo-card">
+      <h3><span class="badge-num">4</span> VP 表达查询（披露日志）</h3>
+      <div class="vc-hint">按 VP ID 精确查询，或按持有者 DID 列出其全部 VP 表达。</div>
+      <div class="field">
+        <label class="field-label" for="vp-query-id">VP ID（可选）</label>
+        <input class="input" id="vp-query-id" placeholder="如 vp:abcd1234ef5678">
+      </div>
+      <div class="field">
+        <label class="field-label" for="vp-query-holder">持有者 DID（可选）</label>
+        <input class="input" id="vp-query-holder" placeholder="如 did:chainmaker:holder:8aF3c2">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-sm" onclick="queryVP(false)">查询</button>
+        <button class="btn btn-ghost btn-sm" onclick="queryVP(true)">查询全部</button>
+      </div>
+      <div class="code-box" id="vp-query-output" style="display:none;"></div>
+    </div>
+  </div>
+
   <!-- Section: 签发者目录 (CA) -->
   <div class="section" id="sec-ca">
     <div class="section-head">
@@ -1474,6 +1514,126 @@ inspector: 张XX</textarea>
         <span class="ca-note" style="margin:0">统一命名空间 <code>did:trust:livestock:party:&lt;issuer_id&gt;:&lt;short&gt;</code>：背书签发机构直接编码进 DID，信任锚验签即强绑定</span>
       </div>
       <div class="ext-ca-grid" id="party-link-grid"></div>
+    </div>
+  </div>
+
+  <!-- Section: DID 管理 -->
+  <div class="section" id="sec-did">
+    <style>
+      .btn-warn{background:#dc2626;color:#fff;border:1px solid #b91c1c;}
+      .btn-warn:hover{background:#b91c1c;}
+      .vc-mgmt-head{margin-top:26px;margin-bottom:6px;font-size:1rem;font-weight:700;color:#16241c;border-top:1px dashed #d8e0d8;padding-top:18px;}
+      .did-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:10px;}
+      .did-status{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.76rem;font-weight:600;margin-left:6px;}
+      .did-status.active{background:rgba(26,127,55,.12);color:#1a7f37;}
+      .did-status.revoked{background:rgba(192,57,43,.12);color:#c0392b;}
+      .did-status.unregistered{background:rgba(176,122,0,.14);color:#9a6b00;}
+      @media (max-width:780px){.did-grid{grid-template-columns:1fr;}}
+    </style>
+    <div class="section-head">
+      <div>
+        <span class="section-num">09 / DID 管理</span>
+        <h2 class="section-title">去中心化身份（DID）全生命周期</h2>
+      </div>
+      <div class="section-desc">命名空间强绑定 · CA 信任锚校验 · 注册 / 注销 / 更新 / 查询</div>
+    </div>
+    <p style="color:var(--ink-2); font-size:var(--t-small); margin-bottom:16px; line-height:1.65;">
+      每个畜牧主体（养殖场 / 屠宰场 / 官方兽医）按统一命名空间
+      <code>did:trust:livestock:party:&lt;issuer_id&gt;:&lt;short&gt;</code> 生成强绑定 DID，
+      <b>short</b> 由统一社会信用代码 SHA256 取前 6 位派生（幂等）。注册须经 CA 信任锚中有效签发机构背书；
+      注销 / 更新均保留不可变 DID 标识。
+    </p>
+
+    <div class="did-grid">
+      <!-- 注册 -->
+      <div class="vc-demo-card">
+        <h3><span class="badge-num">1</span> 注册 DID</h3>
+        <div class="field">
+          <label class="field-label" for="did-credit">统一社会信用代码 *（18 位）</label>
+          <input class="input" id="did-credit" placeholder="如 91110000MA01ABCD23" maxlength="18">
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-name">主体名称 *</label>
+          <input class="input" id="did-name" placeholder="如 XX生态养殖场">
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-role">角色</label>
+          <select class="select" id="did-role">
+            <option value="farm" selected>养殖场</option>
+            <option value="slaughter">屠宰场</option>
+            <option value="vet">官方兽医</option>
+            <option value="unknown">其他</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-region">区域</label>
+          <input class="input" id="did-region" placeholder="如 内蒙古自治区">
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-issuer">背书签发机构 issuer_id</label>
+          <input class="input" id="did-issuer" value="livestock_authority_001">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" onclick="didRegister()">注册 DID</button>
+        </div>
+        <div class="verify-result" id="did-register-output" style="display:none;"></div>
+        <div class="code-box" id="did-register-doc" style="display:none;"></div>
+      </div>
+
+      <!-- 注销 / 更新 -->
+      <div class="vc-demo-card">
+        <h3><span class="badge-num">2</span> 注销 / 更新 DID</h3>
+        <div class="field">
+          <label class="field-label" for="did-target">目标 DID 或信用代码 *</label>
+          <input class="input" id="did-target" placeholder="did:trust:livestock:party:... 或 18 位代码">
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-revoke-reason">注销原因</label>
+          <input class="input" id="did-revoke-reason" value="主体主动注销">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-warn btn-sm" onclick="didRevoke()">注销 DID</button>
+        </div>
+        <div class="verify-result" id="did-revoke-output" style="display:none;"></div>
+        <div class="field" style="margin-top:14px;border-top:1px dashed #d8e0d8;padding-top:12px;">
+          <label class="field-label">更新可变信息（留空则保留原值）</label>
+          <input class="input" id="did-upd-name" placeholder="新名称（可选）" style="margin-top:6px;">
+          <input class="input" id="did-upd-region" placeholder="新区域（可选）" style="margin-top:8px;">
+          <select class="select" id="did-upd-role" style="margin-top:8px;">
+            <option value="">— 新角色（可选）—</option>
+            <option value="farm">养殖场</option>
+            <option value="slaughter">屠宰场</option>
+            <option value="vet">官方兽医</option>
+            <option value="unknown">其他</option>
+          </select>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-outline btn-sm" onclick="didUpdate()">更新信息</button>
+        </div>
+        <div class="verify-result" id="did-update-output" style="display:none;"></div>
+      </div>
+
+      <!-- 查询 -->
+      <div class="vc-demo-card">
+        <h3><span class="badge-num">3</span> 查询 DID</h3>
+        <div class="field">
+          <label class="field-label" for="did-query-did">按 DID 查询</label>
+          <input class="input" id="did-query-did" placeholder="did:trust:livestock:party:...">
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-query-code">或按信用代码查询</label>
+          <input class="input" id="did-query-code" placeholder="18 位统一社会信用代码">
+        </div>
+        <div class="field">
+          <label class="field-label" for="did-query-name">或按名称查询</label>
+          <input class="input" id="did-query-name" placeholder="主体名称（回退种子目录）">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" onclick="didQuery()">查询</button>
+        </div>
+        <div class="verify-result" id="did-query-output" style="display:none;"></div>
+        <div class="code-box" id="did-query-doc" style="display:none;"></div>
+      </div>
     </div>
   </div>
 
@@ -3995,6 +4155,136 @@ document.addEventListener('click', function(e) {
 window.addEventListener('resize', function() {
   if (window._rsResizeHandler) window._rsResizeHandler();
 });
+
+/* ─── DID 管理 · 任务书子目标1 前端（对齐 /api/did/* & /api/vc/revoke & /api/vp/query）─── */
+async function didRegister() {
+  const credit = document.getElementById('did-credit').value.trim();
+  const name = document.getElementById('did-name').value.trim();
+  const role = document.getElementById('did-role').value;
+  const region = document.getElementById('did-region').value.trim();
+  const issuer = document.getElementById('did-issuer').value.trim() || 'livestock_authority_001';
+  const out = document.getElementById('did-register-output');
+  const doc = document.getElementById('did-register-doc');
+  out.style.display = 'block'; doc.style.display = 'none';
+  if (!/^[0-9A-Z]{18}$/.test(credit)) { showVerifyResult('did-register-output', false, '统一社会信用代码格式非法（应为 18 位大写字母/数字）'); return; }
+  if (!name) { showVerifyResult('did-register-output', false, '主体名称不能为空'); return; }
+  try {
+    const r = await securePost('/api/did/register', { credit_code: credit, name, role, region, issuer_id: issuer });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      showVerifyResult('did-register-output', true, 'DID 注册成功：' + ((d.did_document && d.did_document.did) || ''));
+      doc.style.display = 'block'; doc.textContent = JSON.stringify(d.did_document, null, 2);
+    } else {
+      showVerifyResult('did-register-output', false, d.error || ('HTTP ' + r.status));
+    }
+  } catch (e) { showToast('注册失败：' + (e.message || e), 'err'); }
+}
+
+async function didRevoke() {
+  const target = document.getElementById('did-target').value.trim();
+  const reason = document.getElementById('did-revoke-reason').value.trim() || '主体主动注销';
+  const out = document.getElementById('did-revoke-output');
+  out.style.display = 'block';
+  if (!target) { showVerifyResult('did-revoke-output', false, '需提供 DID 或信用代码'); return; }
+  const body = target.startsWith('did:') ? { did: target, reason } : { credit_code: target, reason };
+  try {
+    const r = await securePost('/api/did/revoke', body);
+    const d = await r.json();
+    if (r.ok && d.success) {
+      showVerifyResult('did-revoke-output', true, 'DID 已注销：' + ((d.did_document && d.did_document.did) || target));
+    } else {
+      showVerifyResult('did-revoke-output', false, d.error || ('HTTP ' + r.status));
+    }
+  } catch (e) { showToast('注销失败：' + (e.message || e), 'err'); }
+}
+
+async function didUpdate() {
+  const did = document.getElementById('did-target').value.trim();
+  const name = document.getElementById('did-upd-name').value.trim();
+  const region = document.getElementById('did-upd-region').value.trim();
+  const role = document.getElementById('did-upd-role').value;
+  const out = document.getElementById('did-update-output');
+  out.style.display = 'block';
+  if (!did || !did.startsWith('did:')) { showVerifyResult('did-update-output', false, '请在「注销/更新」面板的「目标 DID」填入 DID 后再更新'); return; }
+  try {
+    const r = await securePost('/api/did/update', { did, name, region, role });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      showVerifyResult('did-update-output', true, 'DID 信息已更新：' + did);
+    } else {
+      showVerifyResult('did-update-output', false, d.error || ('HTTP ' + r.status));
+    }
+  } catch (e) { showToast('更新失败：' + (e.message || e), 'err'); }
+}
+
+async function didQuery() {
+  const did = document.getElementById('did-query-did').value.trim();
+  const code = document.getElementById('did-query-code').value.trim();
+  const name = document.getElementById('did-query-name').value.trim();
+  const out = document.getElementById('did-query-output');
+  const doc = document.getElementById('did-query-doc');
+  out.style.display = 'block'; doc.style.display = 'none';
+  if (!did && !code && !name) { showVerifyResult('did-query-output', false, '请输入 DID / 信用代码 / 名称 之一'); return; }
+  const qs = [did ? ('did=' + encodeURIComponent(did)) : '', code ? ('code=' + encodeURIComponent(code)) : '', name ? ('name=' + encodeURIComponent(name)) : ''].filter(Boolean).join('&');
+  try {
+    const r = await fetch('/api/did/query?' + qs);
+    const d = await r.json();
+    if (r.ok && d.success) {
+      const dd = d.did_document || {};
+      const st = dd.status || '';
+      const parts = [];
+      parts.push('来源：' + (dd.source || '—'));
+      parts.push('状态：' + st);
+      if (dd.ca_linked) parts.push('🔗 已 CA 强绑定（' + (dd.ca_name || dd.ca_issuer || '') + '）');
+      else if (dd.registered === false) parts.push('⚠ 尚未登记主体（种子目录回退）');
+      else if (dd.ca_reason) parts.push('⚠ 未强绑定：' + dd.ca_reason);
+      if (dd.did_revoked) parts.push('⚠ 该主体 DID 已注销');
+      showVerifyResult('did-query-output', !!d.found, parts.join('　'));
+      doc.style.display = 'block'; doc.textContent = JSON.stringify(d.did_document, null, 2);
+    } else {
+      showVerifyResult('did-query-output', false, d.error || ('HTTP ' + r.status));
+    }
+  } catch (e) { showToast('查询失败：' + (e.message || e), 'err'); }
+}
+
+async function revokeVC() {
+  const inp = document.getElementById('vc-revoke-id');
+  let vcId = (inp && inp.value || '').trim();
+  if (!vcId && typeof currentVC !== 'undefined' && currentVC && currentVC.id) vcId = currentVC.id;
+  const reason = (document.getElementById('vc-revoke-reason') && document.getElementById('vc-revoke-reason').value || '').trim() || '凭证撤销';
+  const out = document.getElementById('vc-revoke-output');
+  out.style.display = 'block';
+  if (!vcId) { showVerifyResult('vc-revoke-output', false, '请填写 VC ID，或先在上方生成 VC'); return; }
+  try {
+    const r = await securePost('/api/vc/revoke', { vc_id: vcId, reason });
+    const d = await r.json();
+    if (r.ok && d.success) {
+      showVerifyResult('vc-revoke-output', true, 'VC 已撤销：' + vcId + (d.revoked_at ? (' @ ' + d.revoked_at) : ''));
+    } else {
+      showVerifyResult('vc-revoke-output', false, d.error || ('HTTP ' + r.status));
+    }
+  } catch (e) { showToast('撤销失败：' + (e.message || e), 'err'); }
+}
+
+async function queryVP(all) {
+  const id = (document.getElementById('vp-query-id') && document.getElementById('vp-query-id').value || '').trim();
+  const holder = (document.getElementById('vp-query-holder') && document.getElementById('vp-query-holder').value || '').trim();
+  const out = document.getElementById('vp-query-output');
+  out.style.display = 'block';
+  if (!all && !id && !holder) { out.className = 'code-box'; out.textContent = '请输入 VP ID 或持有者 DID（或点「查询全部」）'; return; }
+  try {
+    const qs = all ? '' : (id ? ('vp_id=' + encodeURIComponent(id)) : ('holder=' + encodeURIComponent(holder)));
+    const r = await fetch('/api/vp/query' + (qs ? ('?' + qs) : ''));
+    const d = await r.json();
+    if (r.ok && d.success) {
+      out.className = 'code-box';
+      out.textContent = '共 ' + d.count + ' 条 VP 日志\n\n' + JSON.stringify(d.vp_logs, null, 2);
+    } else {
+      out.className = 'code-box';
+      out.textContent = '查询失败：' + (d.error || ('HTTP ' + r.status));
+    }
+  } catch (e) { out.className = 'code-box'; out.textContent = '查询异常：' + ((e && e.message) || e); }
+}
 
 </script>
   </div><!-- /main-content -->
