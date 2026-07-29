@@ -589,6 +589,18 @@ body {
   content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 4px;
   border-radius: 4px; background: linear-gradient(180deg, var(--primary), var(--primary-2));
 }
+/* VP 卡片上下文状态：替代原本空旷的等待提示，生成 VC 后填充右侧、避免留白 */
+.vc-vp-status {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 10px 14px; border-radius: var(--r); font-size: var(--t-small); line-height: 1.5;
+}
+.vc-vp-status--wait { background: var(--surface-soft); border: 1px dashed var(--line-2); color: var(--ink-3); }
+.vc-vp-status--ready { background: var(--success-soft); border: 1px solid color-mix(in srgb, var(--success) 32%, transparent); color: var(--ink); }
+.vc-vp-status-ico { font-size: 15px; line-height: 1.4; flex-shrink: 0; }
+.vc-vp-status-txt { flex: 1; min-width: 0; }
+.vc-vp-status-txt code { color: var(--primary-2); word-break: break-all; }
+.vc-vp-status-sub { display: block; font-size: var(--t-micro); color: var(--ink-3); margin-top: 2px; }
+.vc-vp-copy { margin-left: 8px; cursor: pointer; color: var(--primary); font-weight: 600; font-size: var(--t-micro); flex-shrink: 0; }
 .vc-demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 920px) { .vc-demo-grid { grid-template-columns: 1fr; } }
 .vc-demo-card {
@@ -1339,7 +1351,7 @@ body {
     </div>
 
     <!-- 实际构造演示 -->
-    <div class="vc-demo-head">实际构造演示（对齐 DID_test 参考实现）</div>
+    <div class="vc-demo-head">实际构造演示</div>
     <div class="vc-demo-grid">
 
       <!-- VC 构造 -->
@@ -1410,9 +1422,9 @@ inspector: 张XX</textarea>
       <div class="vc-demo-card">
         <h3><span class="badge-num">2</span> 构造 VP（可验证表达）</h3>
         <div class="vc-hint" style="margin-bottom:8px;">VP 包裹已生成的 VC（<b>Level 2</b>：在 VC 已纳入的模块基础上，选择向验证方披露的范围）。</div>
-        <div id="vp-wait-hint" style="padding:14px;background:var(--surface-soft);border-radius:var(--r);border:1px dashed var(--line-2);text-align:center;color:var(--ink-3);font-size:var(--t-small);">
-          <div style="font-size:24px;margin-bottom:6px;">📋</div>
-          请先在左侧「构造 VC」生成凭证<br>再在此处构造 VP 表达
+        <div id="vp-status" class="vc-vp-status vc-vp-status--wait">
+          <span class="vc-vp-status-ico" aria-hidden="true">👈</span>
+          <span class="vc-vp-status-txt">请先在左侧「构造 VC」生成凭证，再在此处构造 VP 表达</span>
         </div>
         <div class="field">
           <label class="field-label" for="vp-challenge">验证方挑战值 Challenge</label>
@@ -1557,7 +1569,15 @@ inspector: 张XX</textarea>
     <style>
       .btn-warn{background:#dc2626;color:#fff;border:1px solid #b91c1c;}
       .btn-warn:hover{background:#b91c1c;}
-      .vc-mgmt-head{margin-top:40px;margin-bottom:6px;font-size:1rem;font-weight:700;color:#16241c;border-top:1px dashed #d8e0d8;padding-top:18px;}
+      .vc-mgmt-head {
+        display: flex; align-items: center; gap: 8px;
+        margin: 34px 0 14px; font-size: var(--t-h2); font-weight: 600; color: var(--ink);
+        padding-left: 14px; position: relative;
+      }
+      .vc-mgmt-head::before {
+        content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 4px;
+        border-radius: 4px; background: linear-gradient(180deg, var(--primary), var(--primary-2));
+      }
       .did-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:10px;}
       .did-status{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.76rem;font-weight:600;margin-left:6px;}
       .did-status.active{background:rgba(26,127,55,.12);color:#1a7f37;}
@@ -1942,9 +1962,15 @@ async function buildVC() {
     var _vcIdBar = document.getElementById('vc-id-bar');
     var _vcIdVal = document.getElementById('vc-id-val');
     if (_vcIdBar && vc.id) { _vcIdBar.style.display = 'block'; _vcIdVal.textContent = vc.id; }
-    /* 隐藏 VP 等待提示 */
-    var _vpWait = document.getElementById('vp-wait-hint');
-    if (_vpWait) _vpWait.style.display = 'none';
+    /* VP 卡片状态：VC 已就绪（填充右侧，避免留白） */
+    var _vpStatus = document.getElementById('vp-status');
+    if (_vpStatus && vc.id) {
+      _vpStatus.className = 'vc-vp-status vc-vp-status--ready';
+      _vpStatus.innerHTML = '<span class="vc-vp-status-ico" aria-hidden="true">✅</span>'
+        + '<span class="vc-vp-status-txt">VC 已就绪 · <code class="mono">' + esc(vc.id) + '</code>'
+        + '<span class="vc-vp-status-sub">现在可在此构造 VP 表达</span></span>'
+        + '<span class="vc-vp-copy" onclick="copyVCId()">复制 VC ID</span>';
+    }
     _renderVpClaims(vc);
     const box = document.getElementById('vc-output');
     box.style.display = 'block'; box.innerHTML = syntaxHL(vc);
@@ -2053,7 +2079,12 @@ function resetVCForm() {
   document.getElementById('vp-output').style.display = 'none';
   document.getElementById('vp-verify-output').style.display = 'none';
   var _vpb = document.getElementById('vp-id-bar'); if(_vpb) _vpb.style.display='none';
-  var _vw = document.getElementById('vp-wait-hint'); if(_vw) _vw.style.display='block';
+  var _vs = document.getElementById('vp-status');
+  if (_vs) {
+    _vs.className = 'vc-vp-status vc-vp-status--wait';
+    _vs.innerHTML = '<span class="vc-vp-status-ico" aria-hidden="true">👈</span>'
+      + '<span class="vc-vp-status-txt">请先在左侧「构造 VC」生成凭证，再在此处构造 VP 表达</span>';
+  }
   currentVC = null; currentVP = null;
 }
 
