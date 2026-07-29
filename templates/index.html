@@ -1498,6 +1498,27 @@ inspector: 张XX</textarea>
     <div class="ca-grid" id="ca-grid"></div>
     <p class="ca-note">演示：吊销某签发者后，回到「VC·VP」重新验证其签发的 VC/VP，将显示「签发者证书已被吊销」。吊销可逆，可随时「恢复」。</p>
 
+    <div class="ext-ca-wrap" id="issuer-reg-wrap" style="border-top:1px dashed #d8e0d8;padding-top:18px;">
+      <div class="ext-ca-head">
+        <h3>登记内部背书签发者</h3>
+        <button class="btn btn-xs" onclick="toggleIssuerRegForm()">+ 登记签发者</button>
+      </div>
+      <div class="ext-ca-form" id="issuer-reg-form" style="display:none">
+        <label>issuer_id（短标识，将编码进 DID 命名空间）*</label>
+        <input id="reg-issuer-id" placeholder="如 vet_station_c（自动生成 did:trust:livestock:issuer:vet_station_c）">
+        <label>签发者名称 *</label>
+        <input id="reg-issuer-name" placeholder="如 XX镇官方兽医检疫站">
+        <label>统一社会信用代码</label>
+        <input id="reg-issuer-usc" placeholder="如 91330100MA0C123456">
+        <label>区域</label>
+        <input id="reg-issuer-region" placeholder="如 杭州市">
+        <label>职责</label>
+        <input id="reg-issuer-role" placeholder="如 产地检疫出证">
+        <button class="btn" onclick="registerIssuer()">登记签发者（根 CA 签发证书）</button>
+      </div>
+      <p class="ca-note">登记后该签发者立即进入信任锚并出现在「DID 管理 · 注册」的背书机构下拉框中（页面无需刷新）。</p>
+    </div>
+
     <div class="ext-ca-wrap" id="ext-ca-wrap">
       <div class="ext-ca-head">
         <h3>外部商业 CA 信任锚（联邦）</h3>
@@ -2182,6 +2203,7 @@ async function revokeIssuer(did) {
     if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
     showToast('已吊销：' + did, 'ok');
     renderCADirectory();
+    await loadIssuers();
   } catch (e) { showToast('吊销失败：' + (e.message || e), 'err'); }
 }
 
@@ -2194,6 +2216,7 @@ async function restoreIssuer(did) {
     if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
     showToast('已恢复：' + did, 'ok');
     renderCADirectory();
+    await loadIssuers();
   } catch (e) { showToast('恢复失败：' + (e.message || e), 'err'); }
 }
 
@@ -2226,6 +2249,36 @@ async function loadExternalCAs() {
 function toggleExtCaForm() {
   const f = document.getElementById('ext-ca-form');
   if (f) f.style.display = (f.style.display === 'none') ? 'block' : 'none';
+}
+
+function toggleIssuerRegForm() {
+  const f = document.getElementById('issuer-reg-form');
+  if (f) f.style.display = (f.style.display === 'none') ? 'block' : 'none';
+}
+
+async function registerIssuer() {
+  const issuerId = (document.getElementById('reg-issuer-id').value || '').trim();
+  const name = (document.getElementById('reg-issuer-name').value || '').trim();
+  const usc = (document.getElementById('reg-issuer-usc').value || '').trim();
+  const region = (document.getElementById('reg-issuer-region').value || '').trim();
+  const role = (document.getElementById('reg-issuer-role').value || '').trim();
+  if (!issuerId) { showToast('请填写 issuer_id', 'err'); return; }
+  if (!name) { showToast('请填写签发者名称', 'err'); return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(issuerId)) { showToast('issuer_id 仅限字母/数字/下划线/连字符', 'err'); return; }
+  try {
+    const tok = await (await fetch('/api/csrf-token')).json();
+    const r = await fetch('/api/issuers/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey(), 'X-CSRF-Token': tok.csrf_token },
+      body: JSON.stringify({ issuer_id: issuerId, name: name, unified_social_credit_code: usc, region: region, role: role })
+    });
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || ('HTTP ' + r.status));
+    showToast('已登记签发者：' + j.did, 'ok');
+    const f = document.getElementById('issuer-reg-form'); if (f) f.style.display = 'none';
+    renderCADirectory();
+    await loadIssuers();   // 关键：登记后立即刷新 DID 注册的背书机构下拉
+  } catch (e) { showToast('登记失败：' + (e.message || e), 'err'); }
 }
 
 async function addExternalCA() {

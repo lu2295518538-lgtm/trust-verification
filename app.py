@@ -1268,6 +1268,27 @@ def api_issuer_restore():
     if not ok: return jsonify({'success': False, 'error': '签发者不存在'}), 404
     return jsonify({'success': True, 'did': did, 'status': 'valid'})
 
+@app.route('/api/issuers/register', methods=['POST'])
+@require_key
+@require_csrf
+@limit
+def api_issuer_register():
+    # 登记新的内部背书签发者（由根 CA 签发证书，持久化到 ca_store.json）
+    body = request.get_json(silent=True) or {}
+    issuer_id = (body.get('issuer_id') or '').strip()
+    name = (body.get('name') or '').strip()
+    usc = (body.get('unified_social_credit_code') or '').strip()
+    region = (body.get('region') or '').strip()
+    role = (body.get('role') or '').strip()
+    if not issuer_id or not name:
+        return jsonify({'success': False, 'error': 'issuer_id 与名称必填'}), 400
+    # 命名空间强约束：did:trust:livestock:issuer:<issuer_id>
+    issuer_did = 'did:trust:livestock:issuer:' + issuer_id
+    r = ca_store.register_issuer(issuer_did, name, usc, region, role)
+    if not r['ok']:
+        return jsonify({'success': False, 'error': r['error']}), 409
+    return jsonify({'success': True, 'did': r['did'], 'issuer_id': issuer_id, 'status': 'valid'})
+
 # ---------- 外部商业 CA 信任锚（联邦） ----------
 @app.route('/api/external-cas')
 @require_key

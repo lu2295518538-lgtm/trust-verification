@@ -183,6 +183,42 @@ class CAStore:
         _save_store(self._store)
         return True
 
+    # ---------- 注册新签发者 ----------
+    def register_issuer(self, issuer_did, name, unified_social_credit_code,
+                        region, role, public_key_x=None, public_key_y=None):
+        """登记一个新的内部背书签发者（由根 CA 签发证书，持久化）。
+        返回 {ok, did?, error?}。"""
+        if not issuer_did or not name:
+            return {"ok": False, "error": "签发者 DID 与名称必填"}
+        if issuer_did in self._store["issuers"]:
+            return {"ok": False, "error": "该签发者 DID 已存在"}
+        kp = generate_keypair()
+        nb = _utcnow()
+        na = nb + timedelta(days=730)
+        year = nb.year
+        seq = len(self._store["issuers"]) + 1
+        cert = {
+            "serial": "CA-%d-%04d" % (year, seq),
+            "issuer_did": ROOT_DID,
+            "subject": {
+                "did": issuer_did, "name": name,
+                "unified_social_credit_code": unified_social_credit_code or "",
+                "region": region or "", "role": role or "",
+            },
+            "public_key_x": public_key_x or kp["public_key_x"],
+            "public_key_y": public_key_y or kp["public_key_y"],
+            "private_key": kp["private_key"],
+            "not_before": _iso(nb),
+            "not_after": _iso(na),
+            "status": "valid",
+            "revoked_at": None,
+            "revoke_reason": None,
+        }
+        cert["signature"] = self._sign_cert(self._store["root"], cert)
+        self._store["issuers"][issuer_did] = cert
+        _save_store(self._store)
+        return {"ok": True, "did": issuer_did, "cert": cert}
+
     # ---------- 外部商业 CA 信任锚（联邦） ----------
     def external_ca_for_issuer(self, did):
         """返回当前 active 且把 did 列入 members 的外部商业 CA（无则 None）。"""
