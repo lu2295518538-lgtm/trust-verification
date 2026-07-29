@@ -583,9 +583,11 @@ body {
 .vc-demo-head {
   display: flex; align-items: center; gap: 8px;
   margin: 28px 0 14px; font-size: var(--t-h2); font-weight: 600; color: var(--ink);
+  padding-left: 14px; position: relative;
 }
 .vc-demo-head::before {
-  content: ''; width: 3px; height: 16px; border-radius: 2px; background: var(--primary);
+  content: ''; position: absolute; left: 0; top: 3px; bottom: 3px; width: 4px;
+  border-radius: 4px; background: linear-gradient(180deg, var(--primary), var(--primary-2));
 }
 .vc-demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 920px) { .vc-demo-grid { grid-template-columns: 1fr; } }
@@ -1394,6 +1396,10 @@ inspector: 张XX</textarea>
           <button class="btn btn-ghost btn-sm" onclick="resetVCForm()">重置</button>
           <button class="btn btn-outline btn-sm" onclick="verifyVC()">验证 VC</button>
         </div>
+        <div id="vc-id-bar" style="display:none;margin-top:10px;padding:8px 12px;background:var(--primary-soft);border-radius:var(--r-sm);border-left:3px solid var(--primary);font-size:var(--t-small);">
+          <span style="color:var(--ink-3);">VC ID：</span><code id="vc-id-val" class="mono" style="color:var(--primary-2);word-break:break-all;"></code>
+          <span id="vc-id-copy" style="float:right;cursor:pointer;color:var(--primary);font-weight:600;font-size:var(--t-micro);" onclick="copyVCId()">复制</span>
+        </div>
         <div class="code-box" id="vc-output" style="display:none;"></div>
         <div class="issuer-box" id="vc-issuer-box" style="display:none;"></div>
         <div class="verify-result" id="vc-verify-output" style="display:none;"></div>
@@ -1404,6 +1410,10 @@ inspector: 张XX</textarea>
       <div class="vc-demo-card">
         <h3><span class="badge-num">2</span> 构造 VP（可验证表达）</h3>
         <div class="vc-hint" style="margin-bottom:8px;">VP 包裹已生成的 VC（<b>Level 2</b>：在 VC 已纳入的模块基础上，选择向验证方披露的范围）。</div>
+        <div id="vp-wait-hint" style="padding:14px;background:var(--surface-soft);border-radius:var(--r);border:1px dashed var(--line-2);text-align:center;color:var(--ink-3);font-size:var(--t-small);">
+          <div style="font-size:24px;margin-bottom:6px;">📋</div>
+          请先在左侧「构造 VC」生成凭证<br>再在此处构造 VP 表达
+        </div>
         <div class="field">
           <label class="field-label" for="vp-challenge">验证方挑战值 Challenge</label>
           <input class="input" id="vp-challenge" value="nonce-7d3e9f-2026" placeholder="防止重放的随机值">
@@ -1424,6 +1434,10 @@ inspector: 张XX</textarea>
         <div class="btn-row">
           <button class="btn btn-primary btn-sm" id="vp-build-btn" onclick="buildVP()">生成 VP</button>
           <button class="btn btn-outline btn-sm" onclick="verifyVP()">验证 VP</button>
+        </div>
+        <div id="vp-id-bar" style="display:none;margin-top:10px;padding:8px 12px;background:var(--primary-soft);border-radius:var(--r-sm);border-left:3px solid var(--primary);font-size:var(--t-small);">
+          <span style="color:var(--ink-3);">VP ID：</span><code id="vp-id-val" class="mono" style="color:var(--primary-2);word-break:break-all;"></code>
+          <span id="vp-id-copy" style="float:right;cursor:pointer;color:var(--primary);font-weight:600;font-size:var(--t-micro);" onclick="copyVPId()">复制</span>
         </div>
         <div class="code-box" id="vp-output" style="display:none;"></div>
         <div class="verify-result" id="vp-verify-output" style="display:none;"></div>
@@ -1522,7 +1536,7 @@ inspector: 张XX</textarea>
     <style>
       .btn-warn{background:#dc2626;color:#fff;border:1px solid #b91c1c;}
       .btn-warn:hover{background:#b91c1c;}
-      .vc-mgmt-head{margin-top:26px;margin-bottom:6px;font-size:1rem;font-weight:700;color:#16241c;border-top:1px dashed #d8e0d8;padding-top:18px;}
+      .vc-mgmt-head{margin-top:40px;margin-bottom:6px;font-size:1rem;font-weight:700;color:#16241c;border-top:1px dashed #d8e0d8;padding-top:18px;}
       .did-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px;margin-top:10px;}
       .did-status{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.76rem;font-weight:600;margin-left:6px;}
       .did-status.active{background:rgba(26,127,55,.12);color:#1a7f37;}
@@ -1571,7 +1585,10 @@ inspector: 张XX</textarea>
         </div>
         <div class="field">
           <label class="field-label" for="did-issuer">背书签发机构 issuer_id</label>
-          <input class="input" id="did-issuer" value="livestock_authority_001">
+          <select class="select" id="did-issuer">
+            <option value="">加载中…</option>
+          </select>
+          <div style="font-size:var(--t-micro);color:var(--ink-4);margin-top:4px;">来源：CA 信任锚签发者目录（仅显示有效签发机构）</div>
         </div>
         <div class="btn-row">
           <button class="btn btn-primary btn-sm" onclick="didRegister()">注册 DID</button>
@@ -1900,6 +1917,13 @@ async function buildVC() {
     currentVC = vc;
     var _conn = document.getElementById('vc-vp-connector');
     if (_conn) { _conn.style.display = 'block'; var _cm = (vc.credentialSubject || {}).modules || []; document.getElementById('connector-modules').textContent = (_cm.length ? _cm.join(' + ') : '(无)'); }
+    /* 显示 VC ID */
+    var _vcIdBar = document.getElementById('vc-id-bar');
+    var _vcIdVal = document.getElementById('vc-id-val');
+    if (_vcIdBar && vc.id) { _vcIdBar.style.display = 'block'; _vcIdVal.textContent = vc.id; }
+    /* 隐藏 VP 等待提示 */
+    var _vpWait = document.getElementById('vp-wait-hint');
+    if (_vpWait) _vpWait.style.display = 'none';
     _renderVpClaims(vc);
     const box = document.getElementById('vc-output');
     box.style.display = 'block'; box.innerHTML = syntaxHL(vc);
@@ -1973,6 +1997,10 @@ async function buildVP() {
     if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {}; throw new Error(m || ('HTTP ' + r.status)); }
     const vp = await r.json();
     currentVP = vp;
+    /* 显示 VP ID */
+    var _vpIdBar = document.getElementById('vp-id-bar');
+    var _vpIdVal = document.getElementById('vp-id-val');
+    if (_vpIdBar && vp.id) { _vpIdBar.style.display = 'block'; _vpIdVal.textContent = vp.id; }
     const box = document.getElementById('vp-output');
     const _emb = (vp.verifiableCredential && vp.verifiableCredential[0] && vp.verifiableCredential[0].credentialSubject) || {};
     const _leaks = ('selected_data' in _emb);
@@ -2000,9 +2028,26 @@ function resetVCForm() {
   document.getElementById('vc-output').style.display = 'none';
   document.getElementById('vc-issuer-box').style.display = 'none';
   document.getElementById('vc-verify-output').style.display = 'none';
+  var _vib = document.getElementById('vc-id-bar'); if(_vib) _vib.style.display='none';
   document.getElementById('vp-output').style.display = 'none';
   document.getElementById('vp-verify-output').style.display = 'none';
+  var _vpb = document.getElementById('vp-id-bar'); if(_vpb) _vpb.style.display='none';
+  var _vw = document.getElementById('vp-wait-hint'); if(_vw) _vw.style.display='block';
   currentVC = null; currentVP = null;
+}
+
+/* VC / VP ID 复制 */
+function copyVCId() {
+  var el = document.getElementById('vc-id-val');
+  if (!el || !el.textContent) return;
+  if (navigator.clipboard) { navigator.clipboard.writeText(el.textContent).then(function() { showToast('VC ID 已复制', 'ok'); }); }
+  else { showToast('当前环境不支持复制', 'err'); }
+}
+function copyVPId() {
+  var el = document.getElementById('vp-id-val');
+  if (!el || !el.textContent) return;
+  if (navigator.clipboard) { navigator.clipboard.writeText(el.textContent).then(function() { showToast('VP ID 已复制', 'ok'); }); }
+  else { showToast('当前环境不支持复制', 'err'); }
 }
 
 async function renderIssuerInfo() {
@@ -2034,6 +2079,20 @@ async function loadIssuers() {
     const cur = sel.value;
     sel.innerHTML = list.map(it => '<option value="' + esc(it.did) + '" data-name="' + esc(it.name) + '">' + esc(it.name) + (it.status === 'revoked' ? '（已吊销）' : '') + '</option>').join('');
     if (cur) sel.value = cur;
+    /* 同时填充 DID 注册的签发机构下拉（只取有效的，值用 issuer_id 短名） */
+    const didIssuerSel = document.getElementById('did-issuer');
+    if (didIssuerSel) {
+      const activeList = list.filter(function(it){ return it.status !== 'revoked'; });
+      const didCur = didIssuerSel.value;
+      didIssuerSel.innerHTML = activeList.map(function(it){
+        // 从 did:trust:livestock:issuer:<issuer_id> 提取 issuer_id
+        var m = (it.did || '').match(/(?:issuer[:])([^:]+)$/);
+        var iid = m ? m[1] : it.did;
+        return '<option value="' + esc(iid) + '" data-did="' + esc(it.did) + '">' + esc(it.name) + ' (' + esc(iid) + ')' + '</option>';
+      }).join('');
+      if (didCur) { /* 尝试恢复 */ didIssuerSel.value = didCur; }
+      else if (activeList.length > 0) { didIssuerSel.value = activeList[0].did.match(/(?:issuer[:])([^:]+)$/)[1]; }
+    }
   } catch (e) { /* ignore */ }
 }
 

@@ -254,7 +254,10 @@
         <div><label class="fld">区域</label><input id="m-did-region" placeholder="如 内蒙古"></div>
       </div>
       <label class="fld">背书签发机构 issuer_id</label>
-      <input id="m-did-issuer" value="livestock_authority_001">
+      <select id="m-did-issuer">
+        <option value="">加载中…</option>
+      </select>
+      <div style="font-size:11px;color:var(--ink-dim);margin-top:4px;">来源：CA 信任锚（仅有效机构）</div>
       <button class="btn" id="m-did-reg-btn" onclick="mDidRegister()">注册 DID</button>
       <div class="status" id="m-did-reg-out">待操作</div>
     </div>
@@ -834,6 +837,24 @@ async function mQueryVP(all){
 
 /* 若以 deep link 打开（如 /m/#verify?vc=...）自动核验 */
 readVerifyDeepLink();
+
+/* 加载 CA 签发者列表到 DID 注册下拉 */
+async function mLoadIssuers(){
+  try{
+    var r = await fetch("/api/issuers");
+    var dir = await r.json();
+    var list = (dir.issuers || []).filter(function(it){ return it.status !== "revoked"; });
+    var sel = $("m-did-issuer");
+    if(!sel) return;
+    sel.innerHTML = list.map(function(it){
+      var m = (it.did || "").match(/(?:issuer[:])([^:]+)$/);
+      var iid = m ? m[1] : it.did;
+      return '<option value="' + iid + '">' + (it.name || iid) + " (" + iid + ')</option>';
+    }).join("");
+    if(list.length > 0 && !sel.value) sel.value = list[0].did.match(/(?:issuer[:])([^:]+)$/)[1];
+  }catch(e){ console.warn("移动端签发者加载失败:", e); }
+}
+try{ mLoadIssuers(); }catch(_){}
 </script>
 </body>
 </html>
