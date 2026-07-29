@@ -364,8 +364,19 @@ body {
 .result.warn { background: var(--warning-soft); border-color: oklch(85% 0.06 75); }
 .result.info { background: var(--primary-soft); border-color: var(--primary-tint); }
 
-.result-title { font-size: var(--t-h2); font-weight: 600; color: var(--ink); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+.result-title { font-size: var(--t-h2); font-weight: 600; color: var(--ink); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .result-title .ico { font-size: 1.05em; }
+/* 抽取方法徽章 — 提交结果顶部高亮，直观呈现本次实际使用的抽取方法 */
+.method-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--t-micro); font-weight: 600; letter-spacing: .02em;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid transparent;
+  font-family: var(--font-body);
+}
+.method-badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+.method-badge.rule { color: #1a6fb0; background: #e8f3fb; border-color: #b8d8ef; }
+.method-badge.nlp  { color: #8a4bd6; background: #f3ebfb; border-color: #d9c2f0; }
+.method-badge small { font-weight: 400; opacity: .8; }
 .result p { margin-bottom: 6px; }
 .result .step {
   display: flex; gap: 12px; align-items: flex-start;
@@ -870,6 +881,14 @@ body {
             <option value="transport">运输记录</option>
             <option value="slaughter">屠宰记录</option>
           </select>
+        </div>
+        <div class="field">
+          <label class="field-label" for="extract-method">元数据抽取方法</label>
+          <select id="extract-method" class="select" onchange="onExtractMethodChange()">
+            <option value="rule">ETL 规则解析（默认 · 稳定）</option>
+            <option value="nlp">NLP/DL 对照抽取（自由文本）</option>
+          </select>
+          <div class="field-hint" id="extract-method-hint">规则解析：按 GBT 39915-2021 结构化字段映射，适合 key:value 格式。切换为 NLP/DL 可在自由文本下用统计分词 + 词典 NER 抽取实体。</div>
         </div>
         <div class="field">
           <label class="field-label" for="party-select">关联主体</label>
@@ -2626,6 +2645,7 @@ async function submitData() {
     const r = await securePost('/api/submit', {
       raw_data: rawData,
       data_type: document.getElementById('data-type').value,
+      extract_method: document.getElementById('extract-method').value,
       is_structured: true
     });
     const result = await r.json();
@@ -2649,8 +2669,10 @@ function renderSubmitResult(result, chainOk) {
   div.style.display = 'block';
   div.className = 'result ' + (chainOk ? 'ok' : 'warn');
   const s1 = result.step1_extraction, s2 = result.step2_fingerprint, s3 = result.step3_commitment, s4 = result.step4_onchain, s5 = result.step5_chainmaker;
+  // 以服务端实际生效的抽取方法为准（用户选择可能被降级，如 jieba 不可用时走 NLP-lite）
+  const effMethod = (s1 && s1.method) ? s1.method : (result.extract_method || 'rule');
   div.innerHTML =
-    '<div class="result-title"><span class="ico">' + (chainOk ? '' : '') + '</span>上链' + (chainOk ? '成功' : '警告') + ' — 完整链路已执行</div>' +
+    '<div class="result-title"><span class="ico">' + (chainOk ? '' : '') + '</span>上链' + (chainOk ? '成功' : '警告') + ' — 完整链路已执行' + methodBadge(effMethod) + '</div>' +
     stepBlock('01 元数据', s1.method + ' · 置信度 ' + s1.confidence + ' · ' + s1.matched_fields + '/' + s1.total_fields + ' 字段匹配') +
     stepBlock('02 SM3 指纹', s2.fingerprint, true) +
     stepBlock('03 Pedersen 承诺', 'C = ' + s3.commitment, true) +
@@ -2662,6 +2684,15 @@ function renderSubmitResult(result, chainOk) {
 
 function stepBlock(key, val, mono) {
   return '<div class="step"><div class="step-key">' + key + '</div><div class="step-val' + (mono ? '' : ' short') + '">' + val + '</div></div>';
+}
+
+// 抽取方法徽章：rule→蓝（稳定），nlp→紫（对照抽取），以服务端实际生效方法渲染
+function methodBadge(method) {
+  const m = method || 'rule';
+  const isNlp = /^NLP/i.test(m);
+  const cls = isNlp ? 'nlp' : 'rule';
+  const label = isNlp ? 'NLP/DL 对照抽取' : 'ETL 规则解析';
+  return '<span class="method-badge ' + cls + '"><span class="dot"></span>' + label + ' <small>' + escapeHtml(m) + '</small></span>';
 }
 
 async function verifyData(tampered) {
@@ -3700,8 +3731,24 @@ function onDataTypeChange() {
   if (document.getElementById('cert-no').value.trim()) applyCertToRaw();
 }
 
+// 切换抽取方法时同步提示文案，让用户理解当前选择的含义与适用场景
+function onExtractMethodChange() {
+  const m = document.getElementById('extract-method').value;
+  const hint = document.getElementById('extract-method-hint');
+  if (!hint) return;
+  if (m === 'nlp') {
+    hint.innerHTML = 'NLP/DL 对照抽取：用统计分词 + 领域词典 NER 从<b>自由文本</b>中抽取实体（如"2026年3月12日，XX生态养殖场出栏120头肉牛"）。当 jieba 不可用时自动降级为标准库 NLP-lite，结果徽章会如实标注。';
+    hint.className = 'field-hint';
+  } else {
+    hint.innerHTML = '规则解析：按 GBT 39915-2021 结构化字段映射，适合 key:value 格式。切换为 NLP/DL 可在自由文本下用统计分词 + 词典 NER 抽取实体。';
+    hint.className = 'field-hint';
+  }
+}
+
 function resetForm() {
   onDataTypeChange();
+  const em = document.getElementById('extract-method');
+  if (em) { em.value = 'rule'; onExtractMethodChange(); }
   document.getElementById('submit-result').style.display = 'none';
   document.getElementById('verify-result').style.display = 'none';
   currentDataDID = null;
