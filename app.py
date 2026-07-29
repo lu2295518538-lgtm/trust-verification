@@ -80,10 +80,10 @@ def limit(f):
     return d
 
 with get_db() as db:
-    db.execute('''CREATE TABLE IF NOT EXISTS commitments(id INTEGER PRIMARY KEY AUTOINCREMENT, data_did TEXT UNIQUE, data_type TEXT, raw_data TEXT, algorithm TEXT DEFAULT 'SM3', fingerprint TEXT, commitment TEXT, randomness TEXT, owner_did TEXT, owner_key TEXT, chain_tx_id TEXT, block_height INTEGER, metadata TEXT, vc_id TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, subject_did TEXT, triple_commitment TEXT, triple_randomness TEXT, triple_hash_x TEXT)''')
+    db.execute('''CREATE TABLE IF NOT EXISTS commitments(id INTEGER PRIMARY KEY AUTOINCREMENT, data_did TEXT UNIQUE, data_type TEXT, raw_data TEXT, algorithm TEXT DEFAULT 'SM3', fingerprint TEXT, commitment TEXT, randomness TEXT, owner_did TEXT, owner_key TEXT, chain_tx_id TEXT, block_height INTEGER, metadata TEXT, vc_id TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, subject_did TEXT, triple_commitment TEXT, triple_randomness TEXT, triple_hash_x TEXT, extract_method TEXT DEFAULT 'rule')''')
     db.execute('CREATE INDEX IF NOT EXISTS idx_did ON commitments(data_did)')
     # 向后兼容：为已存在（旧 schema）的库补加任务1补齐项新增列（幂等）
-    for col in ('subject_did', 'triple_commitment', 'triple_randomness', 'triple_hash_x'):
+    for col in ('subject_did', 'triple_commitment', 'triple_randomness', 'triple_hash_x', 'extract_method'):
         try:
             db.execute(f'ALTER TABLE commitments ADD COLUMN {col} TEXT')
         except Exception:
@@ -193,6 +193,7 @@ def api_owner():
 @limit
 def api_submit():
     d = request.get_json() or {}
+    extract_method = d.get('extract_method', 'rule')
     raw = d.get('raw_data','').strip()
     if not raw: return jsonify({'success':False,'error':'raw_data empty'}),400
     dtype = d.get('data_type','通用')
@@ -200,7 +201,7 @@ def api_submit():
     _REQUIRE_CERT = {'quarantine', 'transaction', 'transport', 'slaughter'}
     if dtype in _REQUIRE_CERT and not re.search(r'JC\d{4}-[A-Z0-9]+', raw):
         return jsonify({'success': False, 'error': '检疫证号缺失或格式非法（应为 JC+年份4位+-+编号，如 JC2026-00158），拒绝上链'}), 400
-    meta = extract_metadata(raw, dtype)
+    meta = extract_metadata(raw, dtype, method=extract_method)
     fp_r = generate_fingerprint(raw, meta)
     fp = fp_r['fingerprint']
     pb = get_party_binding(raw, meta)
@@ -226,17 +227,17 @@ def api_submit():
     with get_db() as db:
         from datetime import datetime
         ts = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%dT%H:%M:%S.%f+08:00')
-        db.execute('INSERT INTO commitments(data_did,data_type,raw_data,fingerprint,commitment,randomness,owner_did,owner_key,chain_tx_id,block_height,metadata,timestamp,subject_did,triple_commitment,triple_randomness,triple_hash_x) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (did,dtype,raw,fp,C,r_val,OWNER_DID,OWNER_KEYPAIR.get('public_key',''),tx,bh,json.dumps(meta),ts,subject_did,triple_commitment,t_r,triple_x))
+        db.execute('INSERT INTO commitments(data_did,data_type,raw_data,fingerprint,commitment,randomness,owner_did,owner_key,chain_tx_id,block_height,metadata,timestamp,subject_did,triple_commitment,triple_randomness,triple_hash_x,extract_method) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', (did,dtype,raw,fp,C,r_val,OWNER_DID,OWNER_KEYPAIR.get('public_key',''),tx,bh,json.dumps(meta),ts,subject_did,triple_commitment,t_r,triple_x,extract_method))
         db.commit()
     return jsonify({
         'success': True,
-        'step1_extraction': {'method': 'NLP-NER + 模板匹配', 'confidence': 0.5, 'matched_fields': 5, 'total_fields': 10, 'meta': meta},
+        'step1_extraction': {'method': meta.get('method'), 'confidence': meta.get('confidence'), 'matched_fields': meta.get('matched_fields'), 'total_fields': meta.get('total_fields'), 'meta': meta},
         'step2_fingerprint': {'fingerprint': fp, 'algorithm': 'SM3'},
         'step3_commitment': {'commitment': C},
         'step3b_triple_binding': {'subject_did': subject_did, 'triple_commitment': triple_commitment, 'triple_hash_x': triple_x, 'algorithm': 'P-256 Pedersen(SHA256(x))'},
         'step4_onchain': {'data_did': did, 'fingerprint': fp, 'commitment': C, 'randomness': r_val, 'signature': sig, 'chain_tx_id': tx, 'block_height': bh},
         'step5_chainmaker': {'success': bool(tx), 'tx_id': tx, 'block_height': bh, 'contract': 'fact', 'method': 'save', 'error': chain.get('error','') if not tx else ''},
-        'data_did': did, 'fingerprint': fp, 'commitment': C, 'randomness': r_val, 'signature': sig, 'owner_did': OWNER_DID, 'subject_did': subject_did, 'chain_tx_id': tx, 'block_height': bh, 'algorithm': 'SM3', 'data_type': dtype, 'metadata': meta, 'triple_commitment': triple_commitment, 'triple_hash_x': triple_x
+        'data_did': did, 'fingerprint': fp, 'commitment': C, 'randomness': r_val, 'signature': sig, 'owner_did': OWNER_DID, 'subject_did': subject_did, 'chain_tx_id': tx, 'block_height': bh, 'algorithm': 'SM3', 'data_type': dtype, 'metadata': meta, 'extract_method': extract_method, 'triple_commitment': triple_commitment, 'triple_hash_x': triple_x
     })
 
 @app.route('/api/verify', methods=['POST'])
@@ -275,7 +276,7 @@ def api_verify():
     stored_fp = record.get('fingerprint','') if record else ''
     if raw:
         try:
-            meta = extract_metadata(raw, record.get('data_type', 'general') if record else 'general')
+            meta = extract_metadata(raw, record.get('data_type', 'general') if record else 'general', method=record.get('extract_method', 'rule') if record else 'rule')
             new_fp_r = generate_fingerprint(raw, meta)
             fp_to_check = new_fp_r['fingerprint']
         except:

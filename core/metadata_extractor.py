@@ -22,40 +22,28 @@ TEMPLATES = {
     },
 }
 
-def extract_metadata(raw_data: str, data_type: str, is_structured: bool = True) -> dict:
-    import json as _json
+def extract_metadata(raw_data: str, data_type: str, is_structured: bool = True, method: str = 'rule') -> dict:
+    # 任务1 元数据抽取：rule=规则解析(默认,生产稳定) / nlp=NLP对照路径(对齐申报书NLP/DL措辞)
+    if method == 'nlp':
+        from core.metadata_extractor_nlp import extract_metadata_nlp
+        return extract_metadata_nlp(raw_data, data_type)
     template = TEMPLATES.get(data_type, {"fields": [], "type": data_type})
     metadata = {"data_type": template["type"]}
-    stripped = raw_data.strip()
+    lines = [l.strip() for l in raw_data.strip().split('\n') if l.strip()]
 
-    # ── 检测 JSON 格式输入（运输/交易等前端常以 JSON 提交）──
-    _json_obj = None
-    if stripped.startswith('{') or stripped.startswith('['):
-        try:
-            _json_obj = _json.loads(stripped)
-            if isinstance(_json_obj, dict):
-                metadata.update(_json_obj)
-            elif isinstance(_json_obj, list) and _json_obj:
-                metadata.update(_json_obj[0] if isinstance(_json_obj[0], dict) else {})
-        except (ValueError, TypeError):
-            _json_obj = None
-
-    # ── 回退：按行解析 key:value ──
-    if not _json_obj:
-        lines = [l.strip() for l in stripped.split('\n') if l.strip()]
-        for line in lines:
-            for sep in [': ', '：', ':']:
-                if sep in line:
-                    parts = line.split(sep, 1)
-                    if len(parts) == 2:
-                        metadata[parts[0].strip()] = parts[1].strip()
-                    break
+    for line in lines:
+        for sep in [': ', '：', ':']:
+            if sep in line:
+                parts = line.split(sep, 1)
+                if len(parts) == 2:
+                    metadata[parts[0].strip()] = parts[1].strip()
+                break
 
     matched = sum(1 for f in template["fields"] if f in metadata)
     confidence = matched / len(template["fields"]) if template["fields"] else 0.5
     return {
         "metadata": metadata, "confidence": round(confidence, 4),
-        "data_type": template["type"], "method": "ETL" if is_structured else "NER",
+        "data_type": template["type"], "method": "ETL规则解析" if is_structured else "NER",
         "matched_fields": matched, "total_fields": len(template["fields"]),
         "need_review": confidence < 0.85,
     }
